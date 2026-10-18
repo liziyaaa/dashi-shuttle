@@ -1,7 +1,9 @@
-import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.2.1';
-import { synchronize, validateConnection, DATA_REPO } from './sync.js?v=1.2.1';
-import { sheetGeometry, scrollDelta, displayDate } from './ui.js?v=1.2.1';
-import { APP_VERSION, startUpdates } from './updates.js?v=1.2.1';
+import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.0';
+import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.0';
+import { sheetGeometry, scrollDelta, displayDate } from './ui.js?v=1.3.0';
+import { APP_VERSION, startUpdates } from './updates.js?v=1.3.0';
+
+import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.0';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -35,7 +37,15 @@ let lastSynced = '';
 let syncError = '';
 let syncing = false;
 let syncRequested = false;
-let syncTimer;
+let syncClient = connection ? createSyncClient(connection) : null;
+let retryNotBefore = 0;
+let syncFailures = 0;
+let historyError = '';
+let loadingMonth = '';
+let historyController;
+let connectionEpoch = 0;
+const historyChecked = new Map();
+const uploadScheduler = createUploadScheduler(() => runSync(false, 'full'));
 let syncGeneration = 0;
 let activeSyncController;
 let installPrompt;
@@ -50,45 +60,111 @@ function currentData() {
   const raw = localStorage.getItem(STORAGE_KEY);
   return raw ? mergeData(data, validateData(JSON.parse(raw))) : data;
 }
-function persist(next) {
+function localSyncState() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  const saved = raw ? JSON.parse(raw) : null;
+  const stored = saved?._sync;
+  if (stored && stored.pending && ['bookings', 'extras'].every(key => stored.pending[key] && typeof stored.pending[key] === 'object' && !Array.isArray(stored.pending[key])) && typeof stored.pending.settings === 'string') return stored;
+  const pending = saved ? allPending(validateData(saved)) : emptyPending();
+  return { pending, since: hasPending(pending) ? Date.now() : 0, archives: {}, cutoff: '' };
+}
+function persist(next, options = {}) {
   if (storageIssue) throw new Error(storageIssue);
   const safe = validateData(next);
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(safe)); } catch { throw new Error('手机存储空间不足或不允许保存，本次修改未保存。请导出备份后检查浏览器设置。'); }
+  const meta = localSyncState();
+  if (options.changed) meta.pending = markPending(meta.pending, currentData(), safe);
+  if (options.ack) meta.pending = acknowledgePending(meta.pending, options.ack);
+  if (options.archives) { if (JSON.stringify(meta.archives) !== JSON.stringify(options.archives)) historyChecked.clear(); meta.archives = options.archives; }
+  if (options.cutoff) meta.cutoff = options.cutoff;
+  meta.since = hasPending(meta.pending) ? (meta.since || Date.now()) : 0;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...safe, _sync: meta })); } catch { throw new Error('手机存储空间不足或不允许保存，本次修改未保存。请保留当前手机记录并检查存储设置。'); }
   data = safe;
 }
 function change(update) {
-  try { const next = structuredClone(currentData()); update(next); persist(next); render(); queueSync(); return true; }
-  catch (error) { toast(error.message); return false; }
+  try {
+    const next = structuredClone(currentData()); update(next);
+    // Immutable origin month makes historical date changes findable across phones.
+    for (const key of ['bookings', 'extras']) for (const row of next[key]) if (row.date && !row.homeMonth) row.homeMonth = row.date.slice(0, 7);
+    persist(next, { changed: true }); render(); queueSync(); return true;
+  } catch (error) { toast(error.message); return false; }
 }
 function stamp(previous) { return new Date(Math.max(Date.now(), Date.parse(previous || '2000-01-01') + 1)).toISOString(); }
 function updateRecord(key, id, patch) {
   return change(next => { const row = next[key].find(row => row.id === id); if (!row || row.deleted) throw new Error('这条记录已被删除，请刷新查看'); Object.assign(row, patch, { updatedAt: stamp(row.updatedAt) }); });
 }
-function queueSync() { if (!connection) return; syncRequested = true; clearTimeout(syncTimer); syncTimer = setTimeout(() => runSync(), 650); }
-async function runSync(manual = false) {
+function queueSync() {
+  if (!connection || storageIssue) return;
+  const meta = localSyncState();
+  if (!hasPending(meta.pending)) { uploadScheduler.clear(); return; }
+  syncStatus = navigator.onLine ? '已存本机 · 待上传' : '离线 · 等待上传'; updateBadge(); renderSyncState();
+  if (!syncing && navigator.onLine) uploadScheduler.schedule(Math.max((meta.since || Date.now()) + UPLOAD_DELAY, retryNotBefore));
+}
+async function runSync(manual = false, mode = 'full') {
   if (!connection || storageIssue) return;
   if (syncing) { if (manual) syncRequested = true; return; }
-  if (!navigator.onLine) { syncStatus = '离线 · 等待上传'; updateBadge(); renderSyncState(); return; }
+  if (!navigator.onLine) { syncStatus = '离线 · 等待上传'; updateBadge(); renderSyncState(); if (manual) toast('当前离线，记录已保存在本机'); return; }
+  if (!manual && Date.now() < retryNotBefore) { queueSync(); return; }
   const generation = syncGeneration;
-  const config = { ...connection };
-  syncing = true; syncRequested = false; syncError = ''; syncStatus = '正在同步…'; updateBadge(); renderSyncState();
-  activeSyncController = new AbortController();
-  const timeout = setTimeout(() => activeSyncController?.abort(), 25000);
+  const batch = structuredClone(localSyncState().pending);
+  const client = syncClient;
+  syncing = true; syncRequested = false; syncError = ''; syncStatus = mode === 'pull' ? '正在刷新…' : '正在同步…'; updateBadge(); renderSyncState();
+  if (mode === 'full') uploadScheduler.clear();
+  const controller = new AbortController(); activeSyncController = controller;
+  const timeout = setTimeout(() => controller.abort(), 25000);
+  let succeeded = false;
   try {
-    await synchronize(config, currentData, next => { if (generation !== syncGeneration) throw new Error('连接已更改'); persist(mergeData(currentData(), next)); }, activeSyncController.signal);
+    await client.sync(currentData, (next, scope) => {
+      if (generation !== syncGeneration) throw new Error('连接已更改');
+      const merged = scope.history ? mergeData(currentData(), next) : reconcileActive(currentData(), next, localSyncState().pending, scope.cutoff);
+      persist(merged, scope);
+    }, controller.signal, { mode, pending: batch });
     if (generation !== syncGeneration) return;
+    if (mode === 'full') persist(currentData(), { ack: batch });
+    syncFailures = 0; retryNotBefore = 0; succeeded = true;
     lastSynced = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    syncStatus = '已同步 ' + lastSynced;
-    if (manual) toast('已与云端同步');
+    syncStatus = hasPending(localSyncState().pending) ? '已存本机 · 待上传' : '已同步 ' + lastSynced;
+    if (manual) toast(hasPending(localSyncState().pending) ? '本批已同步，新修改将继续上传' : '已与云端同步');
   } catch (error) {
     if (generation !== syncGeneration) return;
-    syncStatus = '同步未完成';
+    syncStatus = '同步未完成'; syncFailures++;
+    retryNotBefore = Math.max(error.retryAt || 0, Date.now() + Math.min(30000 * 2 ** (syncFailures - 1), 600000));
     syncError = error.name === 'AbortError' ? '网络连接超时，记录已保留在本机' : error instanceof TypeError ? '无法连接同步服务，请检查网络后重试' : error.message;
     if (manual) toast(syncError);
   } finally {
-    clearTimeout(timeout); syncing = false; activeSyncController = null;
-    if (generation === syncGeneration) { updateBadge(); render(); if (syncRequested) queueSync(); }
+    clearTimeout(timeout); syncing = false; if (activeSyncController === controller) activeSyncController = null;
+    if (generation === syncGeneration) {
+      const requested = syncRequested; syncRequested = false;
+      updateBadge(); render();
+      if (requested && succeeded) runSync(true);
+      else if (hasPending(localSyncState().pending)) {
+        const meta = localSyncState();
+        if (navigator.onLine) uploadScheduler.schedule(Math.max((meta.since || Date.now()) + UPLOAD_DELAY, retryNotBefore));
+      }
+      loadSelectedHistory(manual);
+    } else if (connection) { queueMicrotask(() => runSync()); }
   }
+}
+async function loadSelectedHistory(force = false) {
+  if (!connection || storageIssue || state.page === 'settings' || !localSyncState().cutoff || state.date >= localSyncState().cutoff) return;
+  const month = state.date.slice(0, 7);
+  if (loadingMonth === month || (!force && Date.now() - (historyChecked.get(month) || 0) < PULL_INTERVAL)) return;
+  if (!navigator.onLine) { historyError = '当前离线，显示本机已缓存的历史记录'; renderHistoryStatus(); return; }
+  historyController?.abort(); const controller = new AbortController(); historyController = controller;
+  const epoch = connectionEpoch; const client = syncClient;
+  loadingMonth = month; historyChecked.set(month, Date.now()); historyError = ''; renderHistoryStatus();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+  try {
+    const archived = await client.history(month, localSyncState().archives || {}, controller.signal);
+    if (epoch !== connectionEpoch || controller.signal.aborted) return;
+    persist(mergeData(currentData(), archived)); historyChecked.set(month, Date.now());
+  } catch (error) { if (epoch === connectionEpoch && historyController === controller) historyError = '历史加载未完成，显示本机缓存；可点立即同步重试'; }
+  finally {
+    clearTimeout(timeout);
+    if (historyController === controller) { loadingMonth = ''; historyController = null; render(); }
+  }
+}
+function renderHistoryStatus() {
+  const status = $('#history-status'); if (status) status.textContent = loadingMonth ? '正在加载历史月份…' : historyError;
 }
 function updateBadge() {
   const badge = $('#connection-status');
@@ -148,6 +224,7 @@ function settingsPage() {
   <section class="panel settings-panel connection-panel"><form id="sync-form"><label>连接密钥<input name="token" type="password" ${connection ? '' : 'required'} placeholder="${connection ? '已保存密钥，填写可更换' : '粘贴管理员提供的密钥'}" autocomplete="off" autocapitalize="none" spellcheck="false"></label><button class="button primary full" type="submit">${connection ? '保存并重新连接' : '连接并同步'}</button></form><p class="sync-state" role="status">${esc(connection ? syncStatus : '尚未连接')}</p><p id="sync-error" class="connection-error" role="alert" ${syncError ? '' : 'hidden'}>${esc(syncError)}</p></section>`;
 }
 function renderSyncState() {
+  if ($('#sync-summary')) $('#sync-summary').textContent = syncStatus;
   const status = $('.sync-state');
   if (status) status.textContent = syncStatus;
   const error = $('#sync-error');
@@ -161,13 +238,16 @@ function render() {
   const focused = document.activeElement === search;
   const selection = focused ? search.selectionStart : 0;
   const hoursScroll = $('.hours')?.scrollLeft;
-  $('#app').innerHTML = `${storageIssue ? `<div class="storage-warning" role="alert">${esc(storageIssue)}</div>` : ''}` + ({ bookings: bookingsPage, income: incomePage, settings: settingsPage }[state.page])();
+  $('#app').innerHTML = `${connection && state.page !== 'settings' ? '<div class="sync-toolbar"><span id="sync-summary"></span><button class="text-button" data-action="sync">立即同步</button></div><p id="history-status" role="status"></p>' : ''}${storageIssue ? `<div class="storage-warning" role="alert">${esc(storageIssue)}</div>` : ''}` + ({ bookings: bookingsPage, income: incomePage, settings: settingsPage }[state.page])();
   document.querySelectorAll('.bottom-nav [data-page]').forEach(button => { button.classList.toggle('active', button.dataset.page === state.page); button.setAttribute('aria-current', button.dataset.page === state.page ? 'page' : 'false'); });
   if (focused && $('#passenger-search')) { $('#passenger-search').focus(); $('#passenger-search').setSelectionRange(selection, selection); }
   if (activeForm && formValues) { const replacement = $('#' + activeForm.id); if (replacement) { for (const entry of formValues) { const input = replacement.elements[entry.name]; if (input) { input.value = entry.value; if (input.type === 'checkbox') input.checked = entry.checked; } } replacement.elements[activeField]?.focus(); } }
   if ($('.hours')) { if (hoursScroll !== undefined) $('.hours').scrollLeft = hoursScroll; else $('.hour.active')?.scrollIntoView({ block: 'nearest', inline: 'center' }); }
   updateBadge();
   refreshDateDisplays();
+  if ($('#sync-summary')) $('#sync-summary').textContent = syncStatus;
+  renderHistoryStatus();
+  queueMicrotask(() => loadSelectedHistory());
 }
 function confirm(title, message, action, destructive = false) {
   $('#confirm-title').textContent = title; $('#confirm-message').textContent = message;
@@ -284,7 +364,7 @@ document.addEventListener('click', event => {
   if (action === 'import') $('#import-file').click();
   if (action === 'sync') runSync(true);
   if (action === 'check-update') updates.check(true);
-  if (action === 'disconnect') confirm('断开云端连接？', '当前手机保留全部本地记录，其他司机和云端数据不受影响。未上传的记录请先同步或导出备份。', () => { syncGeneration++; activeSyncController?.abort(); connection = null; localStorage.removeItem(SYNC_KEY); clearTimeout(syncTimer); syncStatus = '未连接云端'; render(); toast('已断开连接，本机记录已保留'); });
+  if (action === 'disconnect') confirm('断开云端连接？', '当前手机保留全部本地记录，其他司机和云端数据不受影响。未上传的记录请先同步或导出备份。', () => { syncGeneration++; connectionEpoch++; activeSyncController?.abort(); historyController?.abort(); connection = null; syncClient = null; localStorage.removeItem(SYNC_KEY); uploadScheduler.clear(); syncStatus = '未连接云端'; render(); toast('已断开连接，本机记录已保留'); });
   if (action === 'install') { if (installPrompt) { installPrompt.prompt(); installPrompt = null; } else toast('请在浏览器菜单中选择添加到主屏幕'); }
 });
 $('#confirm-action').addEventListener('click', () => { $('#confirm-dialog').close(); const action = confirmAction; confirmAction = null; action?.(); });
@@ -304,7 +384,7 @@ $('#booking-form').addEventListener('submit', event => {
   try {
     const id = f.get('id') || crypto.randomUUID();
     const old = editingSnapshot;
-    const row = { id, date: f.get('date'), hour: f.get('hour'), direction: f.get('direction'), stop: f.get('stop'), pickup: f.get('pickup').trim(), phone: f.get('phone').trim(), name: f.get('name').trim(), passengers: Number(f.get('passengers')), fare: toCents(f.get('fare')), status: f.get('status'), paid: f.get('paid') === 'yes', note: f.get('note').trim(), updatedAt: stamp(old?.updatedAt) };
+    const row = { id, ...(old?.homeMonth ? { homeMonth: old.homeMonth } : {}), date: f.get('date'), hour: f.get('hour'), direction: f.get('direction'), stop: f.get('stop'), pickup: f.get('pickup').trim(), phone: f.get('phone').trim(), name: f.get('name').trim(), passengers: Number(f.get('passengers')), fare: toCents(f.get('fare')), status: f.get('status'), paid: f.get('paid') === 'yes', note: f.get('note').trim(), updatedAt: stamp(old?.updatedAt) };
     if (!/^[+\d ()-]{5,25}$/.test(row.phone)) throw new Error('请填写有效联系电话（5—25 位，可含区号）');
     const candidate = freshData(); candidate.bookings.push(row); validateData(candidate);
     const save = () => {
@@ -331,7 +411,7 @@ document.addEventListener('submit', event => {
     event.preventDefault(); const f = new FormData(event.target);
     try {
       const config = validateConnection({ repo: DATA_REPO, token: f.get('token').trim() || connection?.token });
-      const connect = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(config)); syncGeneration++; activeSyncController?.abort(); connection = config; syncStatus = '等待同步'; syncError = ''; document.activeElement?.blur(); render(); if (syncing) { syncRequested = true; setTimeout(() => runSync(true), 500); } else runSync(true); } catch { toast('无法保存连接，请检查浏览器存储设置'); } };
+      const connect = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(config)); syncGeneration++; connectionEpoch++; activeSyncController?.abort(); historyController?.abort(); historyChecked.clear(); connection = config; syncClient = createSyncClient(config); retryNotBefore = 0; syncFailures = 0; syncStatus = '等待同步'; syncError = ''; document.activeElement?.blur(); render(); if (syncing) { syncRequested = true; setTimeout(() => runSync(true), 500); } else runSync(true); } catch { toast('无法保存连接，请检查浏览器存储设置'); } };
       if (connection && connection.repo !== config.repo) confirm('切换数据仓库？', '本机现有记录会合并到新仓库。请确认这是同一条专线的数据。', connect); else connect();
     } catch (error) { syncError = error.message; renderSyncState(); toast(error.message); }
   }
@@ -346,7 +426,7 @@ async function importFile(file) {
   if ($('#import-file')) $('#import-file').value = '';
 }
 for (const form of ['#booking-form', '#extra-form']) $(form + ' select[name="hour"]').innerHTML = HOURS.map(hour => `<option value="${hour}">${hour} 发车</option>`).join('');
-window.addEventListener('storage', event => { if (event.key === STORAGE_KEY) { try { data = currentData(); render(); } catch { toast('本机数据读取异常，请先备份'); } } });
+window.addEventListener('storage', event => { if (event.key === STORAGE_KEY) { try { data = currentData(); render(); queueSync(); } catch { toast('本机数据读取异常，请先备份'); } } });
 window.addEventListener('online', () => { updateBadge(); runSync(); });
 window.addEventListener('offline', updateBadge);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { render(); runSync(); } });
@@ -356,4 +436,4 @@ let updateStatus = '打开应用时自动检查更新';
 const updates = startUpdates({ notify: toast, canReload: () => !document.querySelector('dialog[open]') && !document.activeElement?.closest('form'), onStatus: message => { updateStatus = message; if ($('#update-status')) $('#update-status').textContent = message; } });
 render();
 if (connection) runSync();
-setInterval(() => { if (document.visibilityState === 'visible' && !$('#booking-dialog').open && !$('#extra-dialog').open) runSync(); }, 45000);
+setInterval(() => { if (document.visibilityState === 'visible' && !$('#booking-dialog').open && !$('#extra-dialog').open) { const meta = localSyncState(); runSync(false, hasPending(meta.pending) && Date.now() >= meta.since + UPLOAD_DELAY ? 'full' : hasPending(meta.pending) ? 'pull' : 'full'); } }, PULL_INTERVAL);

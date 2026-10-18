@@ -86,10 +86,12 @@ test('two independent phones sync through private GitHub API and offline additio
       cloud = JSON.parse(Buffer.from(body.content, 'base64').toString()); revision++; return route.fulfill({ headers, json: {} });
     });
     const phone = await context.newPage();
+    await phone.clock.install();
     await phone.goto('/'); await phone.locator('.bottom-nav [data-page="settings"]').click(); await phone.locator('#sync-form [name="token"]').fill('github_pat_test'); await phone.locator('#sync-form button[type="submit"]').click();
     await expect(phone.locator('.sync-state')).toContainText('已同步'); phones.push({ context, phone });
   }
   const first = phones[0].phone; await first.locator('.bottom-nav [data-page="bookings"]').click(); await first.locator('[data-hour="09:00"]').click(); await first.getByRole('button', { name: '新增预约' }).click(); await first.locator('#booking-form [name="pickup"]').fill('测试同步地点'); await first.locator('#booking-form [name="phone"]').fill('13800000001'); await first.locator('#booking-form button[type="submit"]').click();
+  await first.clock.runFor(30001);
   await expect.poll(() => cloud.bookings.length).toBe(1);
   const second = phones[1].phone; await second.getByRole('button', { name: '保存并重新连接' }).click(); await expect(second.locator('.sync-state')).toContainText('已同步'); await second.locator('.bottom-nav [data-page="bookings"]').click(); await second.locator('[data-hour="09:00"]').click(); await expect(second.locator('.booking-card')).toHaveCount(1);
   await phones[1].context.setOffline(true); await second.getByRole('button', { name: '新增预约' }).click(); await second.locator('#booking-form [name="pickup"]').fill('离线录入地点'); await second.locator('#booking-form [name="phone"]').fill('13800000002'); await second.locator('#booking-form button[type="submit"]').click(); await expect(second.locator('.booking-card')).toHaveCount(2); await phones[1].context.setOffline(false); await expect.poll(() => cloud.bookings.length).toBe(2);

@@ -18,9 +18,14 @@ export function validateData(input) {
     for (const row of input[collection]) {
       if (!row || !string(row.id, 100) || !row.id || ids.has(row.id) || !isTimestamp(row.updatedAt)) throw new Error('记录编号或更新时间无效');
       ids.add(row.id);
-      if (row.deleted === true) { data[collection].push({ id: row.id, deleted: true, updatedAt: row.updatedAt }); continue; }
+      const placement = {};
+      if (row.homeMonth !== undefined) {
+        if (typeof row.homeMonth !== 'string' || !/^20\d{2}-(0[1-9]|1[0-2])$|^2100-(0[1-9]|1[0-2])$/.test(row.homeMonth)) throw new Error('归档月份无效');
+        placement.homeMonth = row.homeMonth;
+      }
+      if (row.deleted === true) { data[collection].push({ id: row.id, deleted: true, updatedAt: row.updatedAt, ...(validDate(row.date) ? { date: row.date } : {}), ...placement }); continue; }
       if (!validDate(row.date) || !HOURS.includes(row.hour) || !['outbound', 'return'].includes(row.direction) || !string(row.note, 300)) throw new Error('记录中的日期、班次或备注无效');
-      const base = { id: row.id, date: row.date, hour: row.hour, direction: row.direction, note: row.note, updatedAt: row.updatedAt };
+      const base = { id: row.id, date: row.date, hour: row.hour, direction: row.direction, note: row.note, updatedAt: row.updatedAt, ...placement };
       if (collection === 'bookings') {
         if (!['大石', '马岭', '江门', '兴文高铁站'].includes(row.stop) || !string(row.pickup, 100) || !row.pickup.trim() || !string(row.phone, 25) || !/^[+\d ()-]{5,25}$/.test(row.phone) || !string(row.name, 30) || !Number.isInteger(row.passengers) || row.passengers < 1 || row.passengers > 99 || !Number.isSafeInteger(row.fare) || row.fare < 0 || row.fare > 9999900 || !['booked', 'boarded', 'cancelled'].includes(row.status) || typeof row.paid !== 'boolean') throw new Error('乘客信息或票价无效，请检查备份文件');
         data.bookings.push({ ...base, stop: row.stop, pickup: row.pickup, phone: row.phone, name: row.name, passengers: row.passengers, fare: row.fare, status: row.status, paid: row.paid });

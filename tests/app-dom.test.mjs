@@ -15,7 +15,7 @@ async function fixture(t) {
   const viewport = new window.EventTarget(); viewport.height = 844; viewport.offsetTop = 0;
   Object.defineProperty(window, 'visualViewport', { value: viewport });
   // Evaluate the real production modules in one DOM realm; no app logic is copied.
-  const modules = await Promise.all(['core.js', 'sync.js', 'ui.js', 'updates.js', 'app.js'].map(async path => (await readFile(new URL('../' + path, import.meta.url), 'utf8')).replace(/^import[^\n]+\n/gm, '').replace(/^export /gm, '')));
+  const modules = await Promise.all(['core.js', 'sync.js', 'ui.js', 'updates.js', 'scheduler.js', 'app.js'].map(async path => (await readFile(new URL('../' + path, import.meta.url), 'utf8')).replace(/^import[^\n]+\n/gm, '').replace(/^export /gm, '')));
   window.eval(modules.join('\n'));
   const document = window.document;
   const get = selector => document.querySelector(selector);

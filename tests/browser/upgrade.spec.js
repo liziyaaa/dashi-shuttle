@@ -6,8 +6,8 @@ import { APP_VERSION } from '../../updates.js';
 
 test('installed v1.2.0 upgrades once, keeps local bookings and has no repeated update banner', async ({ page }) => {
   let upgraded = false;
-  const names = ['index.html', 'app.js', 'core.js', 'ui.js', 'updates.js', 'sync.js', 'sw.js', 'styles.css', 'manifest.webmanifest', 'version.json'];
-  const previous = new Map(names.map(name => [name, execFileSync('git', ['show', `9b26f14:${name}`])]));
+  const names = ['index.html', 'app.js', 'core.js', 'ui.js', 'updates.js', 'sync.js', 'sw.js', 'scheduler.js', 'styles.css', 'manifest.webmanifest', 'version.json'];
+  const previous = new Map(names.filter(name => name !== 'scheduler.js').map(name => [name, execFileSync('git', ['show', `9b26f14:${name}`])]));
   const types = { js: 'text/javascript', css: 'text/css', html: 'text/html', json: 'application/json', webmanifest: 'application/manifest+json', png: 'image/png' };
   const server = createServer(async (req, res) => {
     try {
@@ -31,7 +31,7 @@ test('installed v1.2.0 upgrades once, keeps local bookings and has no repeated u
     await expect(page.locator('#update-banner')).toBeVisible();
     await page.locator('[data-update-now]').click();
     await expect(page.locator('#page-scroll')).toBeVisible();
-    await expect.poll(() => page.evaluate(async () => (await import('./updates.js?v=' + '1.2.1')).APP_VERSION)).toBe(APP_VERSION);
+    await expect.poll(() => page.evaluate(async () => (await import('./updates.js?v=' + '1.3.0')).APP_VERSION)).toBe(APP_VERSION);
     await expect(page.locator('#update-banner')).toBeHidden();
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dashi-shuttle:v1')).bookings[0].pickup)).toBe('升级前记录');
     await page.reload();

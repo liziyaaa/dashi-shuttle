@@ -30,7 +30,7 @@ test('GitHub sync retries SHA conflicts, preserving other drivers additions', as
   const original = global.fetch; let gets = 0; let puts = 0; let accepted = freshData(); accepted.bookings.push(booking('local'));
   global.fetch = async (url, options) => {
     if (!url.includes('/contents/')) return new Response(JSON.stringify({ private: true, default_branch: 'main', archived: false }));
-    if (options.method === 'GET') { gets++; const remote = freshData(); remote.bookings.push(booking(gets === 1 ? 'remote' : 'remote2')); return new Response(JSON.stringify({ content: encodeData(remote), sha: 'sha-' + gets })); }
+    if (options.method === 'GET') { gets++; const remote = freshData(); remote.bookings.push(booking('remote')); if (gets > 1) remote.bookings.push(booking('remote2')); return new Response(JSON.stringify({ content: encodeData(remote), sha: 'sha-' + gets })); }
     puts++; if (puts === 1) return new Response('{}', { status: 409 }); const written = decodeData(JSON.parse(options.body).content); assert.equal(written.bookings.length, 3); return new Response('{}');
   };
   try { await synchronize({ repo: 'owner/private', token: 'github_pat_test' }, () => accepted, next => { accepted = next; }); assert.equal(gets, 2); assert.equal(puts, 2); } finally { global.fetch = original; }

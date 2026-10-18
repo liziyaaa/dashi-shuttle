@@ -38,7 +38,7 @@ test('startup checks the server without caching and reports the current release'
   assert.equal(f.reloads, 0);
 });
 test('waiting update requires explicit acceptance, can be postponed and never discards an open form', async t => {
-  const f = setup(t, { waiting: true, version: '1.3.0', canReload: false });
+  const f = setup(t, { waiting: true, version: '1.4.0', canReload: false });
   await tick(); assert.equal(f.banner.hidden, false); assert.equal(f.messages, 0);
   f.banner.querySelector('[data-update-later]').click(); assert.equal(f.banner.hidden, true);
   await f.app.check(true); assert.equal(f.banner.hidden, false);
@@ -54,13 +54,13 @@ test('an update accepted in another tab does not refresh this tab', async t => {
   f.sw.dispatchEvent(new Event('controllerchange')); assert.equal(f.reloads, 0);
 });
 test('a release finishing installation prompts without activating automatically', async t => {
-  const f = setup(t, { version: '1.3.0' }); await tick();
+  const f = setup(t, { version: '1.4.0' }); await tick();
   f.reg.installing = f.worker; f.worker.state = 'installing'; f.reg.dispatchEvent(new Event('updatefound'));
   f.reg.waiting = f.worker; f.worker.state = 'installed'; f.worker.dispatchEvent(new Event('statechange')); await tick();
   assert.equal(f.banner.hidden, false); assert.equal(f.messages, 0);
 });
 test('foreground rechecks and restores a postponed update prompt', async t => {
-  const f = setup(t, { version: '1.3.0', waiting: true }); await tick();
+  const f = setup(t, { version: '1.4.0', waiting: true }); await tick();
   f.banner.querySelector('[data-update-later]').click();
   f.document.dispatchEvent(new Event('visibilitychange')); await tick();
   assert.equal(f.banner.hidden, false);
@@ -74,7 +74,7 @@ test('network errors are caught and leave a retry status', async t => {
   assert.match(f.status.at(-1), /稍后重试/); assert.equal(f.reloads, 0);
 });
 test('an unsupported service worker still offers a normal refresh for a newer release', async t => {
-  const f = setup(t, { noWorker: true, version: '1.3.0' }); await tick();
+  const f = setup(t, { noWorker: true, version: '1.4.0' }); await tick();
   f.banner.querySelector('[data-update-now]').click(); await tick(); assert.equal(f.reloads, 1);
 });
 test('release references and offline assets agree, with project subdirectory support', async () => {
@@ -108,13 +108,13 @@ test('same-version and older waiting caches never prompt, including foreground r
   assert.equal(f.banner.hidden, true); assert.equal(f.messages, 0);
 });
 test('a stale waiting cache is never activated as the advertised newer release', async t => {
-  const f = setup(t, { waiting: true, version: '1.3.0', workerVersion: APP_VERSION }); await tick();
+  const f = setup(t, { waiting: true, version: '1.4.0', workerVersion: APP_VERSION }); await tick();
   f.banner.querySelector('[data-update-now]').click(); await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(f.messages, 0); assert.match(f.notices.at(-1), /正在准备/);
 });
 
 test('a stale banner is cleared when a fresh check no longer advertises a newer release', async t => {
-  const f = setup(t, { waiting: true, version: '1.3.0' }); await tick();
+  const f = setup(t, { waiting: true, version: '1.4.0' }); await tick();
   assert.equal(f.banner.hidden, false);
   f.setVersion(APP_VERSION); await f.app.check();
   assert.equal(f.banner.hidden, true); assert.match(f.status.at(-1), /最新版本/);
