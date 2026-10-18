@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.2.1';
 export function newerVersion(candidate, current = APP_VERSION) {
   if (!/^\d+\.\d+\.\d+$/.test(candidate)) return false;
   const a = candidate.split('.').map(Number), b = current.split('.').map(Number);
@@ -10,14 +10,16 @@ export function startUpdates({ notify, canReload, onStatus }) {
   const banner = document.querySelector('#update-banner');
   let registration, availableVersion = '', dismissed = false, checking, applying = false;
   const show = () => {
-    if (!registration?.waiting && !availableVersion) return;
-    banner.querySelector('[data-update-version]').textContent = availableVersion ? `v${availableVersion}` : '新版本';
+    // A waiting worker may be the same release as this page (iOS can load the
+    // new page before activating its worker). Only a newer version is an update.
+    if (!newerVersion(availableVersion)) { banner.hidden = true; return; }
+    banner.querySelector('[data-update-version]').textContent = `v${availableVersion}`;
     if (!dismissed) banner.hidden = false;
     onStatus('发现新版本，可立即更新');
   };
   const watch = worker => {
     if (!worker) return;
-    worker.addEventListener('statechange', () => { if (worker.state === 'installed') show(); });
+    worker.addEventListener('statechange', () => { if (worker.state === 'installed') check(); });
   };
   const ready = 'serviceWorker' in navigator ? navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
     registration = reg;
@@ -41,10 +43,10 @@ export function startUpdates({ notify, canReload, onStatus }) {
         const response = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
         if (!response.ok) throw new Error('版本检查失败');
         const release = await response.json();
-        if (newerVersion(release.version)) availableVersion = release.version;
-        await registration?.update();
-        if (registration?.waiting || availableVersion) show();
-        else { onStatus(`当前已是最新版本 v${APP_VERSION}`); if (manual) notify('当前已是最新版本'); }
+        availableVersion = newerVersion(release.version) ? release.version : '';
+        show();
+        await registration?.update().catch(() => {});
+        if (!availableVersion) { onStatus(`当前已是最新版本 v${APP_VERSION}`); if (manual) notify('当前已是最新版本'); }
       } catch { onStatus('暂时无法检查更新，稍后重试'); if (manual) notify('暂时无法检查更新，请稍后重试'); }
       finally { checking = null; }
     })();
@@ -58,6 +60,20 @@ export function startUpdates({ notify, canReload, onStatus }) {
     if (registration && !registration.waiting) {
       await check(true);
       if (!registration.waiting) return notify('新版本正在准备，请稍后再点更新');
+    }
+    if (!availableVersion) return;
+    if (registration?.waiting) {
+      const worker = registration.waiting;
+      const workerVersion = await new Promise(resolve => {
+        const channel = new MessageChannel();
+        const finish = version => { clearTimeout(timeout); channel.port1.close(); resolve(version); };
+        const timeout = setTimeout(() => finish(null), 1500);
+        channel.port1.onmessage = event => finish(event.data?.version);
+        worker.postMessage({ type: 'GET_VERSION' }, [channel.port2]);
+      });
+      if (worker !== registration.waiting || workerVersion !== availableVersion) {
+        return notify('新版本正在准备，请稍后再点更新');
+      }
     }
     if (!canReload()) return notify('请先保存或关闭正在填写的表单，再更新');
     applying = true;

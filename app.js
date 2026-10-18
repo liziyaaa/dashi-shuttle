@@ -1,7 +1,7 @@
-import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js';
-import { synchronize, validateConnection } from './sync.js';
-import { sheetGeometry, scrollDelta, displayDate } from './ui.js';
-import { APP_VERSION, startUpdates } from './updates.js';
+import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.2.1';
+import { synchronize, validateConnection, DATA_REPO } from './sync.js?v=1.2.1';
+import { sheetGeometry, scrollDelta, displayDate } from './ui.js?v=1.2.1';
+import { APP_VERSION, startUpdates } from './updates.js?v=1.2.1';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -28,10 +28,11 @@ let data = freshData();
 let storageIssue = '';
 let connection = null;
 try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) data = validateData(JSON.parse(raw)); } catch { storageIssue = '本机旧记录无法读取，已保留原始内容。请先导出原始备份，再处理数据。当前已停止写入，避免覆盖。'; }
-try { const raw = localStorage.getItem(SYNC_KEY); if (raw) connection = validateConnection(JSON.parse(raw)); } catch { /* Invalid connection never blocks local records. */ }
+try { const raw = localStorage.getItem(SYNC_KEY); if (raw) connection = validateConnection({ ...JSON.parse(raw), repo: DATA_REPO }); } catch { /* Invalid connection never blocks local records. */ }
 let state = { page: 'bookings', date: localDate(), hour: nextHour(), direction: 'outbound', filter: 'all', search: '' };
 let syncStatus = connection ? '等待同步' : '未连接云端';
 let lastSynced = '';
+let syncError = '';
 let syncing = false;
 let syncRequested = false;
 let syncTimer;
@@ -67,10 +68,10 @@ function queueSync() { if (!connection) return; syncRequested = true; clearTimeo
 async function runSync(manual = false) {
   if (!connection || storageIssue) return;
   if (syncing) { if (manual) syncRequested = true; return; }
-  if (!navigator.onLine) { syncStatus = '离线 · 等待上传'; updateBadge(); return; }
+  if (!navigator.onLine) { syncStatus = '离线 · 等待上传'; updateBadge(); renderSyncState(); return; }
   const generation = syncGeneration;
   const config = { ...connection };
-  syncing = true; syncRequested = false; syncStatus = '正在同步…'; updateBadge();
+  syncing = true; syncRequested = false; syncError = ''; syncStatus = '正在同步…'; updateBadge(); renderSyncState();
   activeSyncController = new AbortController();
   const timeout = setTimeout(() => activeSyncController?.abort(), 25000);
   try {
@@ -82,7 +83,8 @@ async function runSync(manual = false) {
   } catch (error) {
     if (generation !== syncGeneration) return;
     syncStatus = '同步未完成';
-    if (manual) toast(error.name === 'AbortError' ? '网络连接超时，记录已保留在本机' : error.message);
+    syncError = error.name === 'AbortError' ? '网络连接超时，记录已保留在本机' : error instanceof TypeError ? '无法连接同步服务，请检查网络后重试' : error.message;
+    if (manual) toast(syncError);
   } finally {
     clearTimeout(timeout); syncing = false; activeSyncController = null;
     if (generation === syncGeneration) { updateBadge(); render(); if (syncRequested) queueSync(); }
@@ -142,12 +144,14 @@ function incomePage() {
   ${extras.length ? `<section class="panel"><h3>当日补记明细</h3>${extras.map(row => `<div class="extras-row"><div>${esc(row.note)}<small>${row.hour} · ${row.direction === 'return' ? '返回大石' : '开往高铁站'}</small></div><div><b>¥${money(row.amount)}</b><button class="icon-button edit-button" data-delete-extra="${esc(row.id)}" aria-label="删除补记收入 ${esc(row.note)}">${icon('trash')}</button></div></div>`).join('')}</section>` : ''}${footnote()}`;
 }
 function settingsPage() {
-  return `<div class="page-heading"><div><h1>设置</h1><p class="subtitle">同步、票价与数据备份</p></div></div>
-  <div class="settings-grid"><div><section class="panel settings-panel"><div class="panel-title">${icon('cloud')}<h3>多人同步</h3></div><p>所有司机连接同一个私有仓库。联网时每 45 秒检查更新，记账后自动同步；离线记录会在联网后上传。</p><div class="sync-state"><span>${connection ? esc(connection.repo) + '<br>' + esc(syncStatus) : '尚未连接 · 当前记录仅在本机'}</span>${connection ? '<button class="text-button" data-action="sync">立即同步 ↗</button>' : ''}</div><form id="sync-form"><label>私有数据仓库<input name="repo" required value="${esc(connection?.repo || 'liziyaaa/dashi-shuttle-data')}" spellcheck="false" autocapitalize="none" autocomplete="off"></label><label>连接密钥（细粒度令牌）<input name="token" type="password" ${connection ? '' : 'required'} placeholder="${connection ? '留空保留当前密钥' : 'github_pat_…'}" autocomplete="off" spellcheck="false"></label><p>密钥只保存在当前手机。请只授权数据仓库的 <b>Contents: Read and write</b>，不要使用有其他仓库权限的令牌。</p><button class="button primary" type="submit">${connection ? '更新连接' : '连接并同步'}</button>${connection ? ' <button type="button" class="button secondary" data-action="disconnect">断开连接</button>' : ''}</form><p><a class="inline-link" href="https://github.com/settings/personal-access-tokens/new?name=Xingwen%20Shuttle&amp;description=Private%20shuttle%20ledger%20sync" target="_blank" rel="noopener noreferrer">到 GitHub 创建细粒度令牌 ↗</a> · <a class="inline-link" href="https://github.com/liziyaaa/dashi-shuttle/blob/main/README.md#多人同步" target="_blank" rel="noopener noreferrer">连接步骤 ↗</a></p><p>同一笔记录同时被编辑时，保留更新时间较新的版本。密钥过期后本机仍可记账，请及时更换。</p></section>
-  <section class="panel"><div class="panel-title">${icon('wallet')}<h3>默认票价</h3></div><p>单位：元 / 人。仅用于新预约，已有预约金额不受影响。</p><form id="fares-form"><div class="fare-grid">${Object.entries(data.settings.fares).map(([stop,fare]) => `<label>${stop === '兴文高铁站' ? '高铁站 → 大石' : stop + ' → 高铁站'}<input name="${stop}" type="number" min="0" max="99999" step="0.01" inputmode="decimal" required value="${(fare / 100).toFixed(2)}"></label>`).join('')}</div><label class="checkbox-label"><input name="returnEnabled" type="checkbox" ${data.settings.returnEnabled ? 'checked' : ''}>显示高铁站返回大石的班次</label><p>两个方向均暂按 07:00—21:00 整点始发。大石去程票价尚未确认，默认为 0，请按实际票价修改。</p><button class="button secondary" type="submit">保存设置</button></form></section></div>
-  <div><section class="panel"><div class="panel-title">${icon('shield')}<h3>备份与恢复</h3></div><p>更换手机或清理浏览器前，先备份。备份包含全部日期的预约、电话、收入及票价设置，请妥善保管。</p><button class="button secondary full" data-action="backup">${icon('download')} 导出全部记录（JSON）</button><button class="button secondary full" data-action="import">恢复 / 合并备份</button><input type="file" id="import-file" accept=".json,application/json" hidden><p class="backup-note">恢复会合并记录，保留较新的修改。连接密钥不会放进备份；导入后会同步到已连接的云端。</p>${storageIssue ? '<button class="button secondary full" data-action="raw-backup">导出无法读取的原始记录</button>' : ''}</section>
-  <section class="panel"><div class="panel-title">${icon('bus')}<h3>添加到手机桌面</h3></div><p>从桌面直接打开，像一个日常使用的小应用。首次完整打开后，断网也能记预约。</p><ol class="install-steps"><li><span><b>苹果手机</b><br>用 Safari 打开页面，点击分享，选择「添加到主屏幕」。</span></li><li><span><b>安卓手机</b><br>用 Chrome 或 Edge 打开，在浏览器菜单选择「安装应用」或「添加到主屏幕」。</span></li><li><span><b>先打开应用，再连接云台账</b><br>桌面应用可能使用独立存储，请在桌面应用内完成连接并确认同步成功。</span></li></ol><button class="button primary full" id="install-button" data-action="install" ${installPrompt ? '' : 'hidden'}>安装兴文高铁站专线</button></section>
-  <section class="panel"><h3>应用更新</h3><p>当前版本 v${APP_VERSION}。打开应用或返回前台时自动检查新版本。</p><p id="update-status" role="status">${esc(updateStatus)}</p><button type="button" class="button secondary full" data-action="check-update">检查更新</button></section><section class="panel"><h3>记账小提示</h3><p>① 接到电话后，选择日期、方向和班次录入。<br>② 接到人后标记上车，收到钱后再点「收款」。<br>③ 没有预约的临时乘客，在收入统计中补记。<br>④ 预约取消后，不再计入人数和收入；若已收款，请线下核实退款。</p></section></div></div><p class="app-version">兴文高铁站专线 · 司机台账 v${APP_VERSION}</p>`;
+  return `<div class="page-heading"><div><h1>设置</h1></div></div>
+  <section class="panel settings-panel connection-panel"><form id="sync-form"><label>连接密钥<input name="token" type="password" ${connection ? '' : 'required'} placeholder="${connection ? '已保存密钥，填写可更换' : '粘贴管理员提供的密钥'}" autocomplete="off" autocapitalize="none" spellcheck="false"></label><button class="button primary full" type="submit">${connection ? '保存并重新连接' : '连接并同步'}</button></form><p class="sync-state" role="status">${esc(connection ? syncStatus : '尚未连接')}</p><p id="sync-error" class="connection-error" role="alert" ${syncError ? '' : 'hidden'}>${esc(syncError)}</p></section>`;
+}
+function renderSyncState() {
+  const status = $('.sync-state');
+  if (status) status.textContent = syncStatus;
+  const error = $('#sync-error');
+  if (error) { error.textContent = syncError; error.hidden = !syncError; }
 }
 function render() {
   const activeForm = document.activeElement?.closest('#sync-form, #fares-form');
@@ -209,9 +213,8 @@ function openBooking(id) {
 let bookingScrollY = 0;
 let sheetFrame, focusTimer;
 function lockBookingPage() {
-  bookingScrollY = window.scrollY;
+  bookingScrollY = $('#page-scroll').scrollTop;
   document.body.classList.add('booking-open');
-  document.body.style.top = `-${bookingScrollY}px`;
 }
 function revealBookingField() {
   const field = document.activeElement;
@@ -249,8 +252,7 @@ $('#keyboard-done').addEventListener('click', () => {
 $('#booking-dialog').addEventListener('close', () => {
   cancelAnimationFrame(sheetFrame); clearTimeout(focusTimer);
   document.body.classList.remove('booking-open');
-  document.body.style.top = '';
-  window.scrollTo(0, bookingScrollY);
+  $('#page-scroll').scrollTop = bookingScrollY;
 });
 function openExtra() { const form = $('#extra-form'); form.reset(); form.elements.date.value = state.date; form.elements.hour.value = state.hour; form.elements.direction.value = state.direction; $('#extra-direction-field').hidden = !data.settings.returnEnabled; $('#extra-error').textContent = ''; refreshDateDisplays(); $('#extra-dialog').showModal(); }
 function download(content, name, type = 'application/json') { const url = URL.createObjectURL(new Blob([content], { type })); const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 15000); }
@@ -259,7 +261,7 @@ function exportBackup() { download(JSON.stringify({ ...currentData(), exportedAt
 document.addEventListener('click', event => {
   const button = event.target.closest('button'); if (!button) return;
   if (button.dataset.close) return closeDialog(button.dataset.close);
-  if (button.dataset.page) { state.page = button.dataset.page; state.search = ''; render(); window.scrollTo(0, 0); return; }
+  if (button.dataset.page) { state.page = button.dataset.page; state.search = ''; render(); $('#page-scroll').scrollTo(0, 0); return; }
   if (button.dataset.hour) { state.hour = button.dataset.hour; state.search = ''; render(); return; }
   if (button.dataset.direction) { state.direction = button.dataset.direction; render(); return; }
   if (button.dataset.filter) { state.filter = button.dataset.filter; render(); return; }
@@ -269,7 +271,7 @@ document.addEventListener('click', event => {
     const row = live(data.bookings).find(row => row.id === button.dataset.paid); if (!row) return;
     confirm(row.paid ? '撤销这笔收款？' : `确认已收到 ¥${money(row.fare * row.passengers)}？`, row.paid ? '撤销后，本单会恢复为未收款，并从实收中扣除。' : `${row.name || row.phone} · ${row.passengers} 人。本单将按全额计入 ${row.date} ${row.hour} 班次实收。`, () => { if (updateRecord('bookings', row.id, { paid: !row.paid })) toast(row.paid ? '已撤销收款' : '收款已记入台账'); }); return;
   }
-  if (button.dataset.viewTrip) { state.hour = button.dataset.viewTrip; state.page = 'bookings'; state.filter = 'all'; state.search = ''; render(); window.scrollTo(0, 0); return; }
+  if (button.dataset.viewTrip) { state.hour = button.dataset.viewTrip; state.page = 'bookings'; state.filter = 'all'; state.search = ''; render(); $('#page-scroll').scrollTo(0, 0); return; }
   if (button.dataset.deleteExtra) { const row = data.extras.find(row => row.id === button.dataset.deleteExtra); confirm('删除这笔补记收入？', `¥${money(row.amount)} · ${row.note}。删除后会同步从收入中扣除。`, () => { if (updateRecord('extras', row.id, { deleted: true })) toast('已删除补记收入'); }, true); return; }
   const action = button.dataset.action;
   if (action === 'add') openBooking();
@@ -328,10 +330,10 @@ document.addEventListener('submit', event => {
   if (event.target.id === 'sync-form') {
     event.preventDefault(); const f = new FormData(event.target);
     try {
-      const config = validateConnection({ repo: f.get('repo').trim(), token: f.get('token').trim() || connection?.token });
-      const connect = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(config)); syncGeneration++; activeSyncController?.abort(); connection = config; syncStatus = '等待同步'; render(); if (syncing) { syncRequested = true; setTimeout(() => runSync(true), 500); } else runSync(true); } catch { toast('无法保存连接，请检查浏览器存储设置'); } };
+      const config = validateConnection({ repo: DATA_REPO, token: f.get('token').trim() || connection?.token });
+      const connect = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(config)); syncGeneration++; activeSyncController?.abort(); connection = config; syncStatus = '等待同步'; syncError = ''; document.activeElement?.blur(); render(); if (syncing) { syncRequested = true; setTimeout(() => runSync(true), 500); } else runSync(true); } catch { toast('无法保存连接，请检查浏览器存储设置'); } };
       if (connection && connection.repo !== config.repo) confirm('切换数据仓库？', '本机现有记录会合并到新仓库。请确认这是同一条专线的数据。', connect); else connect();
-    } catch (error) { toast(error.message); }
+    } catch (error) { syncError = error.message; renderSyncState(); toast(error.message); }
   }
 });
 async function importFile(file) {

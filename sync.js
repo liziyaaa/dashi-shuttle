@@ -1,22 +1,31 @@
-import { freshData, mergeData, validateData } from './core.js';
+import { freshData, mergeData, validateData } from './core.js?v=1.2.1';
+export const DATA_REPO = 'liziyaaa/dashi-shuttle-data';
 const FILE = 'ledger.json';
 export function encodeData(data) { const bytes = new TextEncoder().encode(JSON.stringify(data, null, 2)); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); }
 export function decodeData(content) { return validateData(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(content.replace(/\s/g, '')), c => c.charCodeAt(0))))); }
 export function validateConnection(config) {
-  if (!config || !/^[\w.-]+\/[\w.-]+$/.test(config.repo) || !/^github_pat_[A-Za-z0-9_]+$/.test(config.token || '')) throw new Error('请填写 owner/仓库名 和 github_pat_ 开头的细粒度令牌，不接受广泛权限令牌');
-  return { repo: config.repo, token: config.token };
+  const repo = config?.repo || DATA_REPO;
+  const token = (config?.token || '').trim();
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !/^github_pat_[A-Za-z0-9_]+$/.test(token)) throw new Error('请粘贴管理员提供的完整连接密钥（github_pat_ 开头）');
+  return { repo, token };
 }
 export async function synchronize(config, getCurrent, accept, signal) {
-  validateConnection(config);
+  config = validateConnection(config);
   const url = `https://api.github.com/repos/${config.repo}/contents/${FILE}`;
   const headers = { Accept: 'application/vnd.github+json', Authorization: `Bearer ${config.token}`, 'X-GitHub-Api-Version': '2022-11-28' };
   const request = async (method, body, endpoint = url) => {
     const response = await fetch(endpoint, { method, headers: { ...headers, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, cache: 'no-store', signal });
     if (!response.ok) {
-      if (response.status === 409 || response.status === 422) return { conflict: true };
+      if (method === 'PUT' && response.status === 409) return { conflict: true };
+      if (method === 'PUT' && response.status === 422) {
+        const detail = await response.json().catch(() => ({}));
+        if (/sha|already exists/i.test(detail.message || '')) return { conflict: true };
+        throw new Error('云端拒绝保存记录（422），请联系管理员检查数据仓库');
+      }
       if (response.status === 401) throw new Error('连接密钥无效或已过期，请重新设置');
-      if (response.status === 403) throw new Error('无写入权限或请求过于频繁，请检查密钥权限');
-      if (response.status === 404) throw new Error('无法读取私有数据仓库，请检查仓库名及密钥的访问范围');
+      if (response.status === 429 || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')) throw new Error('同步请求过于频繁，请稍后重试，记录已保留在本机');
+      if (response.status === 403) throw new Error('连接密钥权限不足，请联系管理员为数据仓库开启 Contents 读写权限');
+      if (response.status === 404) throw new Error(endpoint === url ? '无法读取云端台账（ledger.json），请联系管理员检查文件及密钥的 Contents 读取权限' : '连接密钥无法访问私有数据仓库，请联系管理员授权 liziyaaa/dashi-shuttle-data');
       throw new Error(`同步未完成（${response.status}），记录已保留在本机`);
     }
     return response.json();

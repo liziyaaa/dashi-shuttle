@@ -19,7 +19,10 @@
   -webkit-font-smoothing: antialiased;
 }
 * { box-sizing: border-box; }
-body { margin: 0; font-size: 15px; line-height: 1.5; }
+html { height: 100%; overflow: hidden; }
+body { margin: 0; font-size: 15px; line-height: 1.5; height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+.page-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; padding-top: env(safe-area-inset-top); }
+body:has(dialog[open]) .page-scroll { overflow-y: hidden; }
 body:has(dialog[open]) { overflow: hidden; }
 button, input, select, textarea { font: inherit; -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }
@@ -141,7 +144,7 @@ h3 { font-size: 16px; font-weight: 600; }
 .button.compact svg { width: 15px; height: 15px; }
 .full { width: 100%; }
 .grow { flex: 1; }
-.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: center; justify-content: center; gap: 100px; background: #fafafaeF; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: .5px solid #d4d4d9; padding: 7px 15px calc(8px + env(safe-area-inset-bottom)); }
+.bottom-nav { position: relative; flex: 0 0 auto; z-index: 10; display: flex; align-items: center; justify-content: center; gap: 100px; background: #fafafaeF; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: .5px solid #d4d4d9; padding: 7px 15px calc(8px + env(safe-area-inset-bottom)); }
 .bottom-nav button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px 20px; min-width: 90px; border: 0; background: none; font-size: 10px; color: #929299; }
 .bottom-nav button.active { color: var(--accent); font-weight: 500; }
 .bottom-nav span { display: flex; }
@@ -358,7 +361,7 @@ legend { font-size: 13px; font-weight: 500; padding: 0; margin-bottom: 8px; }
 .date-control { min-height: 48px; align-items: center; }
 .date-control .icon-button { height: 44px; width: 32px; }
 .form-date { justify-content: flex-start; align-items: center; min-height: 46px; padding: 11px 12px; background: var(--soft); font-size: 16px; font-weight: 400; }
-body.booking-open { position: fixed; width: 100%; overflow: hidden; }
+body.booking-open .page-scroll { overflow-y: hidden; }
 .booking-sheet { inset: var(--sheet-top, 12px) 0 auto; margin: 0 auto; height: var(--sheet-height, calc(100dvh - 24px)); max-height: var(--sheet-height, calc(100dvh - 24px)); }
 .booking-sheet .sheet-heading h2 { margin-right: auto; }
 .keyboard-done { flex-shrink: 0; font-size: 13px; padding: 8px 0; }
@@ -376,3 +379,7 @@ body.booking-open { position: fixed; width: 100%; overflow: hidden; }
   .update-banner { margin: 0 20px 8px; align-items: flex-start; flex-direction: column; gap: 10px; }
   .update-actions { align-self: flex-end; }
 }
+
+.connection-panel { max-width: 540px; margin-left: auto; margin-right: auto; }
+.connection-panel .sync-state { margin-bottom: 0; }
+.connection-panel .connection-error { color: var(--danger); margin-top: 12px; }

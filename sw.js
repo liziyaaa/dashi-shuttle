@@ -1,11 +1,14 @@
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const CACHE = `dashi-shuttle-v${VERSION}`;
-const ASSETS = ['./', './index.html', `./styles.css?v=${VERSION}`, `./app.js?v=${VERSION}`, './core.js', './sync.js', './ui.js', './updates.js', `./manifest.webmanifest?v=${VERSION}`, `./icons/icon-192.png?v=${VERSION}`, `./icons/icon-512.png?v=${VERSION}`, `./icons/maskable-512.png?v=${VERSION}`, `./icons/apple-touch-icon.png?v=${VERSION}`];
+const ASSETS = ['./', './index.html', `./styles.css?v=${VERSION}`, `./app.js?v=${VERSION}`, `./core.js?v=${VERSION}`, `./sync.js?v=${VERSION}`, `./ui.js?v=${VERSION}`, `./updates.js?v=${VERSION}`, `./manifest.webmanifest?v=${VERSION}`, `./icons/icon-192.png?v=${VERSION}`, `./icons/icon-512.png?v=${VERSION}`, `./icons/maskable-512.png?v=${VERSION}`, `./icons/apple-touch-icon.png?v=${VERSION}`];
 // A new release waits for the user; installation never interrupts data entry.
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => Promise.all(ASSETS.map(asset => cache.add(new Request(asset, { cache: 'reload' }))))));
 });
-self.addEventListener('message', event => { if (event.data?.type === 'SKIP_WAITING') self.skipWaiting(); });
+self.addEventListener('message', event => {
+  if (event.data?.type === 'GET_VERSION') event.ports?.[0]?.postMessage({ version: VERSION });
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
 self.addEventListener('activate', event => {
   event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('dashi-shuttle-') && key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim()));
 });

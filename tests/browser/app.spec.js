@@ -55,16 +55,16 @@ test('cancelled bookings excluded, paid reversal and deletion', async ({ page })
   await page.locator('[data-edit]').click(); await page.locator('#delete-booking').click(); await page.locator('#confirm-action').click();
   await expect(page.locator('.booking-card')).toHaveCount(0);
 });
-test('offline cache, settings backup export and narrow viewport', async ({ page, context }) => {
+test('offline cache, key-only settings and narrow viewport', async ({ page, context }) => {
   await page.goto('/');
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.reload();
   await context.setOffline(true); await page.reload();
   await expect(page.getByRole('heading', { name: '今天的行程' })).toBeVisible();
   await page.locator('.bottom-nav [data-page="settings"]').click();
-  await expect(page.locator('#fares-form [name="马岭"]')).toHaveValue('40.00');
-  const downloadPromise = page.waitForEvent('download'); await page.getByRole('button', { name: '导出全部记录（JSON）' }).click();
-  expect((await downloadPromise).suggestedFilename()).toMatch(/\.json$/);
+  await expect(page.locator('#sync-form input')).toHaveCount(1);
+  await expect(page.locator('#sync-form [name="token"]')).toBeVisible();
+  await expect(page.locator('#fares-form, #install-button, #import-file')).toHaveCount(0);
   await page.setViewportSize({ width: 360, height: 780 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await context.setOffline(false);
@@ -91,7 +91,7 @@ test('two independent phones sync through private GitHub API and offline additio
   }
   const first = phones[0].phone; await first.locator('.bottom-nav [data-page="bookings"]').click(); await first.locator('[data-hour="09:00"]').click(); await first.getByRole('button', { name: '新增预约' }).click(); await first.locator('#booking-form [name="pickup"]').fill('测试同步地点'); await first.locator('#booking-form [name="phone"]').fill('13800000001'); await first.locator('#booking-form button[type="submit"]').click();
   await expect.poll(() => cloud.bookings.length).toBe(1);
-  const second = phones[1].phone; await second.getByRole('button', { name: '立即同步 ↗' }).click(); await expect(second.locator('.sync-state')).toContainText('已同步'); await second.locator('.bottom-nav [data-page="bookings"]').click(); await second.locator('[data-hour="09:00"]').click(); await expect(second.locator('.booking-card')).toHaveCount(1);
+  const second = phones[1].phone; await second.getByRole('button', { name: '保存并重新连接' }).click(); await expect(second.locator('.sync-state')).toContainText('已同步'); await second.locator('.bottom-nav [data-page="bookings"]').click(); await second.locator('[data-hour="09:00"]').click(); await expect(second.locator('.booking-card')).toHaveCount(1);
   await phones[1].context.setOffline(true); await second.getByRole('button', { name: '新增预约' }).click(); await second.locator('#booking-form [name="pickup"]').fill('离线录入地点'); await second.locator('#booking-form [name="phone"]').fill('13800000002'); await second.locator('#booking-form button[type="submit"]').click(); await expect(second.locator('.booking-card')).toHaveCount(2); await phones[1].context.setOffline(false); await expect.poll(() => cloud.bookings.length).toBe(2);
   for (const { context } of phones) await context.close();
 });
@@ -168,4 +168,43 @@ test('home date display has one line, navigates across years and opens booking o
   await page.getByRole('button', { name: '新增预约', exact: true }).click();
   await expect(page.locator('#booking-form [name="date"]')).toHaveValue('2027-01-01');
   await expect(page.locator('#booking-form .date-display')).toHaveText('2027年1月1日');
+});
+
+test('bottom navigation stays at viewport bottom while only page content scrolls', async ({ page }) => {
+  await page.goto('/');
+  const nav = page.locator('.bottom-nav');
+  for (const height of [844, 568, 932]) {
+    await page.setViewportSize({ width: 390, height });
+    for (const section of ['bookings', 'income', 'settings']) {
+      await nav.locator(`[data-page="${section}"]`).click();
+      for (const top of [100, 700, 9999, 0, 400]) {
+        await page.locator('#page-scroll').evaluate((el, top) => { el.scrollTop = top; }, top);
+        const box = await nav.boundingBox();
+        expect(Math.abs(box.y + box.height - height)).toBeLessThan(2);
+        expect(await page.evaluate(() => scrollY)).toBe(0);
+      }
+    }
+  }
+});
+
+test('key-only connection errors stay visible and a replacement key reconnects without exposing credentials', async ({ page, context }) => {
+  await context.route('https://api.github.com/**', async route => {
+    const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GitHub-Api-Version, Accept, Cache-Control, Pragma' };
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    expect(route.request().url()).toContain('/repos/liziyaaa/dashi-shuttle-data');
+    if (route.request().headers().authorization.includes('denied')) return route.fulfill({ status: 404, headers, json: {} });
+    if (!route.request().url().includes('/contents/')) return route.fulfill({ headers, json: { private: true, default_branch: 'main' } });
+    return route.fulfill({ headers, json: { sha: '1', content: Buffer.from(JSON.stringify({ schema: 1, bookings: [], extras: [], settings: { fares: { 大石: 0, 马岭: 4000, 江门: 2000, 兴文高铁站: 6000 }, returnEnabled: true, updatedAt: '2020-01-01T00:00:00.000Z' } })).toString('base64') } });
+  });
+  await page.goto('/'); await page.locator('.bottom-nav [data-page="settings"]').click();
+  await page.locator('[name="token"]').fill('github_pat_denied');
+  await page.locator('#sync-form button').click();
+  await expect(page.locator('#sync-error')).toContainText('无法访问私有数据仓库');
+  await page.locator('.bottom-nav [data-page="bookings"]').click();
+  await page.locator('.bottom-nav [data-page="settings"]').click();
+  await expect(page.locator('#sync-error')).toBeVisible();
+  await page.locator('[name="token"]').fill('github_pat_valid'); await page.locator('#sync-form button').click();
+  await expect(page.locator('.sync-state')).toContainText('已同步');
+  await expect(page.locator('#sync-error')).toBeHidden();
+  expect(await page.locator('#app').innerHTML()).not.toContain('github_pat_valid');
 });

@@ -37,3 +37,23 @@ test('GitHub sync retries SHA conflicts, preserving other drivers additions', as
 });
 test('sync refuses unreadable private data and never overwrites it', async () => { const original = global.fetch; global.fetch = async () => new Response('{}', { status: 404 }); try { await assert.rejects(synchronize({ repo: 'owner/private', token: 'github_pat_test' }, freshData, () => {}), /私有数据仓库/); } finally { global.fetch = original; } });
 test('public repositories are rejected before any passenger data upload', async () => { const original = global.fetch; let calls = 0; global.fetch = async () => { calls++; return new Response(JSON.stringify({ private: false, default_branch: 'main' })); }; try { await assert.rejects(synchronize({ repo: 'owner/public', token: 'github_pat_test' }, freshData, () => {}), /私有仓库/); assert.equal(calls, 1); } finally { global.fetch = original; } });
+
+test('sync distinguishes repository access, missing ledger, expired key and write permission without overwriting data', async t => {
+  const original = global.fetch;
+  t.after(() => { global.fetch = original; });
+  for (const [stage, status, expected] of [
+    ['repository', 404, /无法访问私有数据仓库/], ['ledger', 404, /ledger.json/],
+    ['repository', 401, /无效或已过期/], ['ledger', 403, /Contents 读写权限/], ['write', 403, /Contents 读写权限/],
+  ]) {
+    let accepted = freshData(); accepted.bookings.push(booking('local'));
+    let writes = 0;
+    global.fetch = async (url, options) => {
+      const current = !url.includes('/contents/') ? 'repository' : options.method === 'GET' ? 'ledger' : 'write';
+      if (current === 'write') writes++;
+      if (stage === current) return new Response('{}', { status });
+      return new Response(JSON.stringify(current === 'repository' ? { private: true, default_branch: 'main' } : { content: encodeData(freshData()), sha: 'original' }));
+    };
+    await assert.rejects(synchronize({ token: ' github_pat_test\n' }, () => accepted, next => { accepted = next; }), expected);
+    assert.equal(accepted.bookings.length, 1); assert.equal(writes, stage === 'write' ? 1 : 0);
+  }
+});
