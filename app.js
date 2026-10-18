@@ -1,9 +1,9 @@
-import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.1';
-import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.1';
-import { sheetGeometry, scrollDelta, displayDate, departurePassed } from './ui.js?v=1.3.1';
-import { APP_VERSION, startUpdates } from './updates.js?v=1.3.1';
+import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.2';
+import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.2';
+import { sheetGeometry, scrollDelta, displayDate, departurePassed } from './ui.js?v=1.3.2';
+import { APP_VERSION, startUpdates } from './updates.js?v=1.3.2';
 
-import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.1';
+import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.2';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -171,7 +171,8 @@ function updateBadge() {
   const badge = $('#connection-status');
   const offline = !navigator.onLine;
   badge.classList.toggle('error', !!storageIssue || (connection && (syncStatus === '同步未完成' || offline)));
-  badge.innerHTML = `<i></i> ${esc(storageIssue ? '存储异常' : connection ? (offline ? '离线 · 本机保存' : syncStatus) : '本机保存')}`;
+  badge.innerHTML = `<i></i><span id="sync-summary">${esc(storageIssue ? '存储异常' : connection ? (offline ? '离线 · 本机保存' : syncStatus) : '本机保存')}</span>`;
+  $('#header-sync-button').hidden = !connection;
 }
 function dateControls() { return `<div class="date-control"><button class="icon-button" data-action="previous-date" aria-label="前一天" ${state.date === '2020-01-01' ? 'disabled' : ''}>‹</button><label class="date-picker home-date"><span class="date-display" aria-hidden="true">${displayDate(state.date, true)}</span><input type="date" id="selected-date" aria-label="查看日期" min="2020-01-01" max="2100-12-31" value="${state.date}"></label><button class="icon-button" data-action="next-date" aria-label="后一天" ${state.date === '2100-12-31' ? 'disabled' : ''}>›</button><button class="today-button" data-action="today">今天</button></div>`; }
 function refreshDateDisplays() {
@@ -195,10 +196,10 @@ function bookingsPage() {
   rows.sort((a, b) => a.hour.localeCompare(b.hour) || a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
   return `${heading(state.date === localDate() ? '今天的行程' : '预约台账')}
   ${!connection ? `<div class="sync-hint"><span>${icon('cloud')} 尚未开启多人同步</span><button class="text-button" data-page="settings">设置 ›</button></div>` : ''}
-  <div class="overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收')}<section class="day-card"><div class="day-card-head"><h3>当日预约</h3><span class="route-pill">往返专线</span></div><div class="day-counts"><div><strong>${day.passengers}<small>人</small></strong><p>预约乘客</p></div><div><strong>${day.waiting}<small>人</small></strong><p>等待上车</p></div></div><div class="route-line"><b>大石</b><i></i><b>马岭</b><i></i><b>江门</b><i></i><span class="station">兴文高铁站</span></div></section></div>
-  <div class="toolbar">${directionControls()}<span class="toolbar-note">07:00—21:00 · 每小时一班</span></div>
+  <div class="overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收')}<section class="day-card"><div class="day-card-head"><h3>当日预约</h3></div><div class="day-counts"><div><strong>${day.passengers}<small>人</small></strong><p>预约乘客</p></div><div><strong>${day.waiting}<small>人</small></strong><p>等待上车</p></div></div></section></div>
+  <div class="toolbar">${directionControls()}</div>
   <section class="schedule-wrap"><div class="section-caption"><span>选择发车班次</span><small>时间为始发站发车时间</small></div><div class="hours" aria-label="班次">${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<button class="hour ${!state.allDay && state.hour === hour ? 'active' : ''} ${s.count ? 'has-bookings' : ''}" data-hour="${hour}" aria-pressed="${!state.allDay && state.hour === hour}"><strong>${hour}</strong><small>${s.passengers ? s.passengers + ' 人预约' : '暂无预约'}</small></button>`; }).join('')}</div></section>
-  <div class="list-heading"><div class="list-title"><h2>${state.allDay ? (state.date === localDate() ? '今日乘客' : '当日乘客') : state.hour + ' 乘客'}</h2><span>${state.direction === 'return' ? '返回大石' : '开往高铁站'}${state.allDay ? ' · 全部班次' : ''}</span></div><button class="button primary compact" data-action="add">${icon('plus')} 新增预约</button></div>
+  <div class="list-heading"><div class="list-title"><h2>${state.allDay ? (state.date === localDate() ? '今日乘客' : '当日乘客') : state.hour + ' 乘客'}</h2></div><button class="button primary compact" data-action="add">${icon('plus')} 新增预约</button></div>
   <div class="search-bar">${icon('search')}<input id="passenger-search" type="search" placeholder="查找${state.allDay ? '当天' : '本班'}的电话、称呼、上车点" aria-label="查找${state.allDay ? '当天' : '本班'}乘客" value="${esc(state.search)}" autocomplete="off"></div>
   <div class="filter-tabs" aria-label="乘车状态">${[['all','全部'],['booked','待上车'],['boarded','已上车'],['cancelled','已取消']].map(([key,label]) => `<button data-filter="${key}" class="${state.filter === key ? 'active' : ''}" aria-pressed="${state.filter === key}">${label}</button>`).join('')}</div>
   <div class="trip-summary"><span>${state.allDay ? '当天' : '本班'}预约 <b>${trip.passengers}</b> 人 · 待接 <b>${trip.waiting}</b> 人</span><span>实收 <b>¥${money(trip.received)}</b></span></div>
@@ -250,14 +251,13 @@ function render() {
   const focused = document.activeElement === search;
   const selection = focused ? search.selectionStart : 0;
   const hoursScroll = $('.hours')?.scrollLeft;
-  $('#app').innerHTML = `${connection && state.page !== 'settings' ? '<div class="sync-toolbar"><span id="sync-summary"></span><button class="text-button" data-action="sync">立即同步</button></div><p id="history-status" role="status"></p>' : ''}${storageIssue ? `<div class="storage-warning" role="alert">${esc(storageIssue)}</div>` : ''}` + ({ bookings: bookingsPage, income: incomePage, settings: settingsPage }[state.page])();
+  $('#app').innerHTML = `${connection && state.page !== 'settings' ? '<p id="history-status" role="status"></p>' : ''}${storageIssue ? `<div class="storage-warning" role="alert">${esc(storageIssue)}</div>` : ''}` + ({ bookings: bookingsPage, income: incomePage, settings: settingsPage }[state.page])();
   document.querySelectorAll('.bottom-nav [data-page]').forEach(button => { button.classList.toggle('active', button.dataset.page === state.page); button.setAttribute('aria-current', button.dataset.page === state.page ? 'page' : 'false'); });
   if (focused && $('#passenger-search')) { $('#passenger-search').focus(); $('#passenger-search').setSelectionRange(selection, selection); }
   if (activeForm && formValues) { const replacement = $('#' + activeForm.id); if (replacement) { for (const entry of formValues) { const input = replacement.elements[entry.name]; if (input) { input.value = entry.value; if (input.type === 'checkbox') input.checked = entry.checked; } } replacement.elements[activeField]?.focus(); } }
   if ($('.hours')) { if (hoursScroll !== undefined) $('.hours').scrollLeft = hoursScroll; else ($('.hour.active') || $(`.hour[data-hour="${state.hour}"]`))?.scrollIntoView({ block: 'nearest', inline: 'center' }); }
   updateBadge();
   refreshDateDisplays();
-  if ($('#sync-summary')) $('#sync-summary').textContent = syncStatus;
   renderHistoryStatus();
   queueMicrotask(() => loadSelectedHistory());
 }

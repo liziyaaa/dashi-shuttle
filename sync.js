@@ -1,4 +1,4 @@
-import { freshData, mergeData, validateData, localDate, validDate } from './core.js?v=1.3.1';
+import { freshData, mergeData, validateData, localDate, validDate } from './core.js?v=1.3.2';
 export const DATA_REPO = 'liziyaaa/dashi-shuttle-data';
 export const UPLOAD_DELAY = 30000;
 export const PULL_INTERVAL = 120000;

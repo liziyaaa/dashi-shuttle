@@ -1,4 +1,4 @@
-const VERSION = '1.3.1';
+const VERSION = '1.3.2';
 const CACHE = `dashi-shuttle-v${VERSION}`;
 const ASSETS = ['./', './index.html', `./styles.css?v=${VERSION}`, `./app.js?v=${VERSION}`, `./core.js?v=${VERSION}`, `./sync.js?v=${VERSION}`, `./ui.js?v=${VERSION}`, `./scheduler.js?v=${VERSION}`, `./updates.js?v=${VERSION}`, `./manifest.webmanifest?v=${VERSION}`, `./icons/icon-192.png?v=${VERSION}`, `./icons/icon-512.png?v=${VERSION}`, `./icons/maskable-512.png?v=${VERSION}`, `./icons/apple-touch-icon.png?v=${VERSION}`];
 // A new release waits for the user; installation never interrupts data entry.

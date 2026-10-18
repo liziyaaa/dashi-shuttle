@@ -75,3 +75,23 @@ test('day-wide search and direction work, income trip drilldown forces one trip,
   await page.locator('[data-hour="17:00"]').click();
   await expect(page.locator('.booking-card')).toHaveCount(5);
 });
+
+test('compact phone home removes redundant captions and fits one passenger above navigation with safe areas', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('dashi-shuttle:connection:v1', JSON.stringify({ token: 'github_pat_test' })));
+  await page.route('https://api.github.com/**', route => route.fulfill({ status: 401, json: {} }));
+  await setup(page);
+  await page.setViewportSize({ width: 393, height: 852 });
+  await page.addStyleTag({ content: '.page-scroll { padding-top: 59px; } .bottom-nav { padding-bottom: 42px; }' });
+  await page.locator('#page-scroll').evaluate(el => { el.scrollTop = 0; });
+  await expect(page.locator('.route-pill, .route-line, .toolbar-note, .list-title > span, .sync-toolbar')).toHaveCount(0);
+  await expect(page.locator('#sync-summary')).toHaveCount(1);
+  const header = await page.locator('.app-header').boundingBox();
+  const sync = await page.locator('.header-sync').boundingBox();
+  expect(sync.y).toBeGreaterThanOrEqual(header.y);
+  expect(sync.y + sync.height).toBeLessThanOrEqual(header.y + header.height);
+  const cards = await page.locator('.overview').boundingBox(); expect(cards.height).toBeLessThan(110);
+  const passenger = await page.locator('.booking-card').first().boundingBox();
+  const nav = await page.locator('.bottom-nav').boundingBox();
+  expect(passenger.y + passenger.height).toBeLessThanOrEqual(nav.y);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
