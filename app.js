@@ -1,5 +1,7 @@
 import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js';
 import { synchronize, validateConnection } from './sync.js';
+import { sheetGeometry, scrollDelta, displayDate } from './ui.js';
+import { APP_VERSION, startUpdates } from './updates.js';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -92,7 +94,12 @@ function updateBadge() {
   badge.classList.toggle('error', !!storageIssue || (connection && (syncStatus === '同步未完成' || offline)));
   badge.innerHTML = `<i></i> ${esc(storageIssue ? '存储异常' : connection ? (offline ? '离线 · 本机保存' : syncStatus) : '本机保存')}`;
 }
-function dateControls() { return `<div class="date-control"><button class="icon-button" data-action="previous-date" aria-label="前一天">‹</button><input type="date" id="selected-date" aria-label="查看日期" min="2020-01-01" max="2100-12-31" value="${state.date}"><button class="icon-button" data-action="next-date" aria-label="后一天">›</button><button class="today-button" data-action="today">今天</button></div>`; }
+function dateControls() { return `<div class="date-control"><button class="icon-button" data-action="previous-date" aria-label="前一天" ${state.date === '2020-01-01' ? 'disabled' : ''}>‹</button><label class="date-picker home-date"><span class="date-display" aria-hidden="true">${displayDate(state.date, true)}</span><input type="date" id="selected-date" aria-label="查看日期" min="2020-01-01" max="2100-12-31" value="${state.date}"></label><button class="icon-button" data-action="next-date" aria-label="后一天" ${state.date === '2100-12-31' ? 'disabled' : ''}>›</button><button class="today-button" data-action="today">今天</button></div>`; }
+function refreshDateDisplays() {
+  document.querySelectorAll('.date-picker').forEach(picker => {
+    picker.querySelector('.date-display').textContent = displayDate(picker.querySelector('input').value, picker.classList.contains('home-date'));
+  });
+}
 function dayName() { const date = new Date(state.date + 'T12:00:00'); const today = state.date === localDate(); return `${date.getMonth() + 1}月${date.getDate()}日 · ${today ? '今天，' : ''}${['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][date.getDay()]}`; }
 function heading(title, subtitle = '') { return `<div class="page-heading"><div><h1>${title}</h1><p class="subtitle">${subtitle || dayName()}</p></div>${dateControls()}</div>`; }
 function directionControls() { return `<div class="segmented" aria-label="行车方向"><button data-direction="outbound" class="${state.direction === 'outbound' ? 'active' : ''}" aria-pressed="${state.direction === 'outbound'}">开往高铁站 ↗</button>${data.settings.returnEnabled ? `<button data-direction="return" class="${state.direction === 'return' ? 'active' : ''}" aria-pressed="${state.direction === 'return'}">返回大石 ↙</button>` : ''}</div>`; }
@@ -140,7 +147,7 @@ function settingsPage() {
   <section class="panel"><div class="panel-title">${icon('wallet')}<h3>默认票价</h3></div><p>单位：元 / 人。仅用于新预约，已有预约金额不受影响。</p><form id="fares-form"><div class="fare-grid">${Object.entries(data.settings.fares).map(([stop,fare]) => `<label>${stop === '兴文高铁站' ? '高铁站 → 大石' : stop + ' → 高铁站'}<input name="${stop}" type="number" min="0" max="99999" step="0.01" inputmode="decimal" required value="${(fare / 100).toFixed(2)}"></label>`).join('')}</div><label class="checkbox-label"><input name="returnEnabled" type="checkbox" ${data.settings.returnEnabled ? 'checked' : ''}>显示高铁站返回大石的班次</label><p>两个方向均暂按 07:00—21:00 整点始发。大石去程票价尚未确认，默认为 0，请按实际票价修改。</p><button class="button secondary" type="submit">保存设置</button></form></section></div>
   <div><section class="panel"><div class="panel-title">${icon('shield')}<h3>备份与恢复</h3></div><p>更换手机或清理浏览器前，先备份。备份包含全部日期的预约、电话、收入及票价设置，请妥善保管。</p><button class="button secondary full" data-action="backup">${icon('download')} 导出全部记录（JSON）</button><button class="button secondary full" data-action="import">恢复 / 合并备份</button><input type="file" id="import-file" accept=".json,application/json" hidden><p class="backup-note">恢复会合并记录，保留较新的修改。连接密钥不会放进备份；导入后会同步到已连接的云端。</p>${storageIssue ? '<button class="button secondary full" data-action="raw-backup">导出无法读取的原始记录</button>' : ''}</section>
   <section class="panel"><div class="panel-title">${icon('bus')}<h3>添加到手机桌面</h3></div><p>从桌面直接打开，像一个日常使用的小应用。首次完整打开后，断网也能记预约。</p><ol class="install-steps"><li><span><b>苹果手机</b><br>用 Safari 打开页面，点击分享，选择「添加到主屏幕」。</span></li><li><span><b>安卓手机</b><br>用 Chrome 或 Edge 打开，在浏览器菜单选择「安装应用」或「添加到主屏幕」。</span></li><li><span><b>先打开应用，再连接云台账</b><br>桌面应用可能使用独立存储，请在桌面应用内完成连接并确认同步成功。</span></li></ol><button class="button primary full" id="install-button" data-action="install" ${installPrompt ? '' : 'hidden'}>安装兴文高铁站专线</button></section>
-  <section class="panel"><h3>记账小提示</h3><p>① 接到电话后，选择日期、方向和班次录入。<br>② 接到人后标记上车，收到钱后再点「收款」。<br>③ 没有预约的临时乘客，在收入统计中补记。<br>④ 预约取消后，不再计入人数和收入；若已收款，请线下核实退款。</p></section></div></div><p class="app-version">兴文高铁站专线 · 司机台账 v1.1</p>`;
+  <section class="panel"><h3>应用更新</h3><p>当前版本 v${APP_VERSION}。打开应用或返回前台时自动检查新版本。</p><p id="update-status" role="status">${esc(updateStatus)}</p><button type="button" class="button secondary full" data-action="check-update">检查更新</button></section><section class="panel"><h3>记账小提示</h3><p>① 接到电话后，选择日期、方向和班次录入。<br>② 接到人后标记上车，收到钱后再点「收款」。<br>③ 没有预约的临时乘客，在收入统计中补记。<br>④ 预约取消后，不再计入人数和收入；若已收款，请线下核实退款。</p></section></div></div><p class="app-version">兴文高铁站专线 · 司机台账 v${APP_VERSION}</p>`;
 }
 function render() {
   const activeForm = document.activeElement?.closest('#sync-form, #fares-form');
@@ -156,6 +163,7 @@ function render() {
   if (activeForm && formValues) { const replacement = $('#' + activeForm.id); if (replacement) { for (const entry of formValues) { const input = replacement.elements[entry.name]; if (input) { input.value = entry.value; if (input.type === 'checkbox') input.checked = entry.checked; } } replacement.elements[activeField]?.focus(); } }
   if ($('.hours')) { if (hoursScroll !== undefined) $('.hours').scrollLeft = hoursScroll; else $('.hour.active')?.scrollIntoView({ block: 'nearest', inline: 'center' }); }
   updateBadge();
+  refreshDateDisplays();
 }
 function confirm(title, message, action, destructive = false) {
   $('#confirm-title').textContent = title; $('#confirm-message').textContent = message;
@@ -196,19 +204,55 @@ function openBooking(id) {
     form.querySelector(`[name="stop"][value="${row.stop}"]`).checked = true;
     form.elements.fare.value = (row.fare / 100).toFixed(2); form.elements.paid.value = row.paid ? 'yes' : 'no';
   }
-  applyDirection(!row); formDirty = false; updateSheetViewport(); $('#booking-dialog').showModal(); $('.sheet-body').scrollTop = 0;
+  applyDirection(!row); formDirty = false; refreshDateDisplays(); lockBookingPage(); $('#booking-dialog').showModal(); $('#form-title').focus({ preventScroll: true }); $('.sheet-body').scrollTop = 0; updateSheetViewport();
+}
+let bookingScrollY = 0;
+let sheetFrame, focusTimer;
+function lockBookingPage() {
+  bookingScrollY = window.scrollY;
+  document.body.classList.add('booking-open');
+  document.body.style.top = `-${bookingScrollY}px`;
+}
+function revealBookingField() {
+  const field = document.activeElement;
+  const body = $('#booking-dialog .sheet-body');
+  if (!body.contains(field) || !field.matches('input, select, textarea')) return;
+  // Scroll only the form body. scrollIntoView can pan the entire iOS page.
+  body.scrollTop += scrollDelta(field.getBoundingClientRect(), body.getBoundingClientRect());
 }
 function updateSheetViewport() {
-  const viewport = window.visualViewport;
-  const height = viewport?.height || window.innerHeight;
-  const keyboardInset = Math.max(0, window.innerHeight - height - (viewport?.offsetTop || 0));
-  document.documentElement.style.setProperty('--sheet-height', Math.max(180, height - 20) + 'px');
-  document.documentElement.style.setProperty('--keyboard-inset', keyboardInset + 'px');
+  if (!$('#booking-dialog').open) return;
+  cancelAnimationFrame(sheetFrame);
+  sheetFrame = requestAnimationFrame(() => {
+    const viewport = window.visualViewport;
+    const geometry = sheetGeometry(viewport?.height || window.innerHeight, viewport?.offsetTop || 0, window.innerHeight);
+    const sheet = $('#booking-dialog');
+    sheet.style.setProperty('--sheet-height', `${geometry.height}px`);
+    sheet.style.setProperty('--sheet-top', `${geometry.top}px`);
+    sheet.classList.toggle('keyboard-open', geometry.keyboard);
+    $('#keyboard-done').hidden = !geometry.keyboard;
+    revealBookingField();
+  });
 }
 window.visualViewport?.addEventListener('resize', updateSheetViewport);
 window.visualViewport?.addEventListener('scroll', updateSheetViewport);
 window.addEventListener('resize', updateSheetViewport);
-function openExtra() { const form = $('#extra-form'); form.reset(); form.elements.date.value = state.date; form.elements.hour.value = state.hour; form.elements.direction.value = state.direction; $('#extra-direction-field').hidden = !data.settings.returnEnabled; $('#extra-error').textContent = ''; $('#extra-dialog').showModal(); }
+$('#booking-dialog').addEventListener('focusin', () => {
+  updateSheetViewport();
+  clearTimeout(focusTimer);
+  focusTimer = setTimeout(updateSheetViewport, 350);
+});
+$('#keyboard-done').addEventListener('click', () => {
+  document.activeElement?.blur();
+  $('#form-title').focus({ preventScroll: true });
+});
+$('#booking-dialog').addEventListener('close', () => {
+  cancelAnimationFrame(sheetFrame); clearTimeout(focusTimer);
+  document.body.classList.remove('booking-open');
+  document.body.style.top = '';
+  window.scrollTo(0, bookingScrollY);
+});
+function openExtra() { const form = $('#extra-form'); form.reset(); form.elements.date.value = state.date; form.elements.hour.value = state.hour; form.elements.direction.value = state.direction; $('#extra-direction-field').hidden = !data.settings.returnEnabled; $('#extra-error').textContent = ''; refreshDateDisplays(); $('#extra-dialog').showModal(); }
 function download(content, name, type = 'application/json') { const url = URL.createObjectURL(new Blob([content], { type })); const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 15000); }
 function exportBackup() { download(JSON.stringify({ ...currentData(), exportedAt: new Date().toISOString() }, null, 2), `兴文高铁站专线-全部备份-${localDate()}.json`); toast('备份已导出，请保存下载的文件'); }
 
@@ -237,6 +281,7 @@ document.addEventListener('click', event => {
   if (action === 'raw-backup') download(localStorage.getItem(STORAGE_KEY) || '', `兴文高铁站专线-原始记录-${localDate()}.json`);
   if (action === 'import') $('#import-file').click();
   if (action === 'sync') runSync(true);
+  if (action === 'check-update') updates.check(true);
   if (action === 'disconnect') confirm('断开云端连接？', '当前手机保留全部本地记录，其他司机和云端数据不受影响。未上传的记录请先同步或导出备份。', () => { syncGeneration++; activeSyncController?.abort(); connection = null; localStorage.removeItem(SYNC_KEY); clearTimeout(syncTimer); syncStatus = '未连接云端'; render(); toast('已断开连接，本机记录已保留'); });
   if (action === 'install') { if (installPrompt) { installPrompt.prompt(); installPrompt = null; } else toast('请在浏览器菜单中选择添加到主屏幕'); }
 });
@@ -247,7 +292,8 @@ document.addEventListener('input', event => {
   if (event.target.closest('#booking-form')) { formDirty = true; if (['fare', 'passengers'].includes(event.target.name)) updateFormTotal(); }
 });
 document.addEventListener('change', event => {
-  if (event.target.id === 'selected-date' && event.target.value) { state.date = event.target.value; render(); }
+  if (event.target.matches('.date-picker input')) refreshDateDisplays();
+  if (event.target.id === 'selected-date') { if (event.target.validity.valid && event.target.value) state.date = event.target.value; render(); }
   if (event.target.closest('#booking-form') && ['stop', 'direction'].includes(event.target.name)) applyDirection(true);
   if (event.target.id === 'import-file') importFile(event.target.files?.[0]);
 });
@@ -304,7 +350,8 @@ window.addEventListener('offline', updateBadge);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { render(); runSync(); } });
 window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; if (state.page === 'settings') render(); });
 window.addEventListener('beforeunload', event => { if (formDirty) { event.preventDefault(); event.returnValue = ''; } });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+let updateStatus = '打开应用时自动检查更新';
+const updates = startUpdates({ notify: toast, canReload: () => !document.querySelector('dialog[open]') && !document.activeElement?.closest('form'), onStatus: message => { updateStatus = message; if ($('#update-status')) $('#update-status').textContent = message; } });
 render();
 if (connection) runSync();
 setInterval(() => { if (document.visibilityState === 'visible' && !$('#booking-dialog').open && !$('#extra-dialog').open) runSync(); }, 45000);

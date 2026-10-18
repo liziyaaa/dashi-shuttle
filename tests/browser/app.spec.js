@@ -120,3 +120,52 @@ test('booking sheet prevents date overlap and keeps save visible on small phones
   await page.screenshot({ path: testInfo.outputPath('mobile-booking.png') });
 });
 
+
+test('note focus survives a visual-only keyboard resize and iOS viewport panning', async ({ page }) => {
+  await page.addInitScript(() => {
+    const viewport = new EventTarget(); viewport.height = 844; viewport.offsetTop = 0;
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: '新增预约', exact: true }).click();
+  const form = page.locator('#booking-form');
+  await form.locator('[name="pickup"]').fill('备注键盘回归测试点');
+  await form.locator('[name="phone"]').fill('13800000009');
+  const note = form.locator('[name="note"]');
+  await note.fill('带两件行李\n请在门口接人🚄');
+  for (const [height, offsetTop] of [[420, 0], [350, 80], [300, 120], [420, 0], [844, 0]]) {
+    await note.focus();
+    await page.evaluate(({ height, offsetTop }) => {
+      Object.assign(visualViewport, { height, offsetTop });
+      visualViewport.dispatchEvent(new Event('resize'));
+    }, { height, offsetTop });
+    await expect.poll(() => page.evaluate(() => {
+      const body = document.querySelector('.sheet-body').getBoundingClientRect();
+      const note = document.querySelector('[name="note"]').getBoundingClientRect();
+      const dialog = document.querySelector('#booking-dialog').getBoundingClientRect();
+      return note.top >= body.top && note.bottom <= body.bottom && dialog.top >= visualViewport.offsetTop && dialog.bottom <= visualViewport.offsetTop + visualViewport.height + 1;
+    })).toBeTruthy();
+    await expect(note).toBeFocused();
+    await expect(note).toHaveValue('带两件行李\n请在门口接人🚄');
+  }
+  await form.getByRole('button', { name: '保存预约' }).click();
+  await page.locator('[data-edit]').click();
+  await expect(note).toHaveValue('带两件行李\n请在门口接人🚄');
+});
+
+test('home date display has one line, navigates across years and opens booking on selected day', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#selected-date').fill('2026-12-31');
+  await page.getByRole('button', { name: '后一天', exact: true }).click();
+  await expect(page.locator('#selected-date')).toHaveValue('2027-01-01');
+  await expect(page.locator('.home-date .date-display')).toHaveText('2027/01/01');
+  for (const width of [320, 360, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    const box = await page.locator('.home-date').boundingBox();
+    expect(box.height).toBeLessThanOrEqual(48);
+  }
+  await page.getByRole('button', { name: '新增预约', exact: true }).click();
+  await expect(page.locator('#booking-form [name="date"]')).toHaveValue('2027-01-01');
+  await expect(page.locator('#booking-form .date-display')).toHaveText('2027年1月1日');
+});

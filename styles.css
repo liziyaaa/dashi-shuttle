@@ -234,7 +234,7 @@ legend { font-size: 13px; font-weight: 500; padding: 0; margin-bottom: 8px; }
 
 /* The booking sheet owns one scrolling body. Its header and save action stay
    visible, including when the iOS keyboard changes the visual viewport. */
-.booking-sheet { position: fixed; inset: auto 0 max(20px, var(--keyboard-inset, 0px)); margin: auto; padding: 0; height: min(840px, var(--sheet-height, calc(100dvh - 40px))); max-height: var(--sheet-height, calc(100dvh - 40px)); overflow: hidden; }
+.booking-sheet { position: fixed; padding: 0; overflow: hidden; }
 .sheet-form { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .booking-sheet .sheet-heading { flex: 0 0 auto; padding: 20px 22px 17px; margin: 0; border-bottom: 1px solid var(--line); }
 .sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 20px 22px 6px; scroll-padding: 16px; }
@@ -319,7 +319,7 @@ legend { font-size: 13px; font-weight: 500; padding: 0; margin-bottom: 8px; }
   .header-action .button { min-height: 36px; font-size: 11px; padding: 8px 10px; }
   .header-action svg { width: 15px; height: 15px; }
   .sheet { border-radius: 20px 20px 0 0; width: 100%; max-width: 560px; margin: auto auto 0; max-height: calc(100dvh - 14px); padding: 22px 20px max(24px, env(safe-area-inset-bottom)); }
-  .booking-sheet { inset: auto 0 var(--keyboard-inset, 0px); padding: 0; height: var(--sheet-height, calc(100dvh - 14px)); max-height: var(--sheet-height, calc(100dvh - 14px)); }
+  .booking-sheet { padding: 0; }
   .booking-sheet .sheet-heading { padding: 18px 20px 16px; }
   .sheet-heading h2 { font-size: 20px; }
   .sheet-body { padding: 18px 20px 4px; }
@@ -347,4 +347,32 @@ legend { font-size: 13px; font-weight: 500; padding: 0; margin-bottom: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; }
+}
+
+/* Native date pickers remain tappable; their localized editor never dictates layout. */
+.date-picker { position: relative; display: flex; justify-content: center; margin: 0; overflow: hidden; border-radius: 10px; }
+.date-picker input[type="date"] { position: absolute; inset: 0; width: 100%; max-width: none; height: 100%; min-height: 0; margin: 0; opacity: 0; cursor: pointer; }
+.date-picker:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.date-display { pointer-events: none; white-space: nowrap; }
+.home-date { width: 112px; min-height: 44px; font-size: 13px; justify-content: center; align-items: center; font-variant-numeric: tabular-nums; }
+.date-control { min-height: 48px; align-items: center; }
+.date-control .icon-button { height: 44px; width: 32px; }
+.form-date { justify-content: flex-start; align-items: center; min-height: 46px; padding: 11px 12px; background: var(--soft); font-size: 16px; font-weight: 400; }
+body.booking-open { position: fixed; width: 100%; overflow: hidden; }
+.booking-sheet { inset: var(--sheet-top, 12px) 0 auto; margin: 0 auto; height: var(--sheet-height, calc(100dvh - 24px)); max-height: var(--sheet-height, calc(100dvh - 24px)); }
+.booking-sheet .sheet-heading h2 { margin-right: auto; }
+.keyboard-done { flex-shrink: 0; font-size: 13px; padding: 8px 0; }
+.keyboard-open .sheet-heading { padding-top: 10px; padding-bottom: 10px; }
+.keyboard-open .booking-footer { padding-top: 8px; padding-bottom: 8px; }
+.booking-sheet textarea { resize: none; scroll-margin: 12px; }
+.update-banner { max-width: 984px; margin: 0 auto 8px; padding: 16px 20px; background: var(--blue-soft); border: 1px solid #007aff25; border-radius: 14px; display: flex; gap: 16px; align-items: center; justify-content: space-between; }
+.update-banner strong { font-size: 15px; }
+.update-banner p { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.update-actions { display: flex; gap: 8px; flex-shrink: 0; }
+@media (max-width: 650px) {
+  .page-heading { flex-wrap: wrap; row-gap: 12px; }
+  .home-date { width: 94px; font-size: 12px; }
+  .date-control .icon-button { width: 28px; }
+  .update-banner { margin: 0 20px 8px; align-items: flex-start; flex-direction: column; gap: 10px; }
+  .update-actions { align-self: flex-end; }
 }

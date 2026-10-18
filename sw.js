@@ -1,14 +1,23 @@
-const CACHE = 'dashi-shuttle-v1.1.0';
-const ASSETS = ['./', './index.html', './styles.css?v=1.1', './app.js?v=1.1', './core.js', './sync.js', './manifest.webmanifest?v=1.1', './icons/logo.svg?v=1.1', './icons/icon-192.png?v=1.1', './icons/icon-512.png?v=1.1', './icons/maskable-512.png?v=1.1', './icons/apple-touch-icon.png?v=1.1'];
-self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())); });
-self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('dashi-shuttle-') && key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())); });
+const VERSION = '1.2.0';
+const CACHE = `dashi-shuttle-v${VERSION}`;
+const ASSETS = ['./', './index.html', `./styles.css?v=${VERSION}`, `./app.js?v=${VERSION}`, './core.js', './sync.js', './ui.js', './updates.js', `./manifest.webmanifest?v=${VERSION}`, `./icons/icon-192.png?v=${VERSION}`, `./icons/icon-512.png?v=${VERSION}`, `./icons/maskable-512.png?v=${VERSION}`, `./icons/apple-touch-icon.png?v=${VERSION}`];
+// A new release waits for the user; installation never interrupts data entry.
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE).then(cache => Promise.all(ASSETS.map(asset => cache.add(new Request(asset, { cache: 'reload' }))))));
+});
+self.addEventListener('message', event => { if (event.data?.type === 'SKIP_WAITING') self.skipWaiting(); });
+self.addEventListener('activate', event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('dashi-shuttle-') && key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim()));
+});
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || !url.href.startsWith(self.registration.scope)) return;
+  // version.json and sw.js always reach the network. Never cache version checks.
   if (!ASSETS.some(asset => new URL(asset, self.registration.scope).pathname === url.pathname)) return;
-  if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request).then(response => { if (!response.ok) throw new Error('Navigation failed'); return response; }).catch(() => caches.match(new URL('./', self.registration.scope))));
-    return;
-  }
-  event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    // Keep HTML and JS on the same installed release until the user accepts.
+    const cached = await cache.match(event.request.mode === 'navigate' ? new URL('./', self.registration.scope) : event.request);
+    return cached || fetch(event.request);
+  })());
 });

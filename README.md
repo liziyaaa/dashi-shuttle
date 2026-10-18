@@ -62,7 +62,7 @@ GitHub Pages 托管公开的程序，乘客电话和收入只存于手机本地�
 
 建议先安装，再在桌面应用内连接云台账：独立桌面应用和浏览器标签页可能使用不同的存储。首次完整加载页面且离线资源缓存完成后，可断网打开并登记。尚未设置密钥时，离线记录仅在本机。部分安卓浏览器可能只提供桌面快捷方式。
 
-页面具有 manifest、192 / 512 图标、Apple touch 图标和 Service Worker；所有资源采用相对路径，支持 GitHub Pages 的项目子目录。缓存按版本升级；发布代码时应同时递增 `sw.js` 中的缓存版本。新缓存安装完成后，关闭全部旧应用窗口再打开，以启用更新。
+页面具有 manifest、192 / 512 图标、Apple touch 图标和 Service Worker；所有资源采用相对路径，支持 GitHub Pages 的项目子目录。缓存按版本升级；发布代码时应同时递增 `sw.js` 中的缓存版本。启动应用、返回前台和恢复联网时会检查新版本，并显示「立即更新 / 稍后」提示。新资源全部缓存完成后，点击「立即更新」才切换版本，正在填写预约时需先保存或关闭表单。更新保留本机记录与连接设置，离线时仍使用当前版本。设置中也可手动检查更新。
 
 ## 备份与隐私
 
@@ -74,13 +74,13 @@ JSON 包含全部日期、联系方式、备注及收款情况，请妥善保管
 
 ```sh
 npm install
-npx playwright install webkit
+npx playwright install chromium webkit
 npm run dev
 npm test
 npm run test:e2e
 ```
 
-本地地址 `http://127.0.0.1:4173/`。应用本身零运行依赖，无需构建，也不加载外部 CDN 字体或脚本。浏览器测试覆盖电脑上已安装的 Chrome 和 Playwright WebKit，包含小屏布局及模拟键盘缩小可视区域；WebKit 测试不等同于 iPhone 真机测试。Chrome 路径不同时，可通过 `CHROME_PATH` 环境变量指定。
+本地地址 `http://127.0.0.1:4173/`。应用本身零运行依赖，无需构建，也不加载外部 CDN 字体或脚本。浏览器测试覆盖 Playwright Chromium 和 WebKit，包含小屏布局及模拟键盘缩小可视区域；WebKit 测试不等同于 iPhone 真机测试。如需使用本机 Chrome，可通过 `CHROME_PATH` 环境变量指定。
 
 GitHub Pages 从 `main` 分支根目录发布；`.nojekyll` 禁用 Jekyll。项目根目录内不保存任何真实乘客数据或令牌。
 
@@ -90,3 +90,16 @@ GitHub Pages 从 `main` 分支根目录发布；`.nojekyll` 禁用 Jekyll。项�
 - 修复 iOS 日期控件挤压班次的问题；小屏预约表单采用固定标题、滚动内容及固定保存按钮，并响应键盘造成的可视区域变化。
 - 保留原应用地址、存储标识与数据仓库，现有预约和连接设置无需迁移。
 - 样式、脚本和图标使用新资源版本；Service Worker 在新离线资源全部就绪后启用。若手机仍显示旧绿色界面，用 Safari 打开 `https://liziyaaa.github.io/dashi-shuttle/?v=1.1`，刷新并关闭旧应用窗口后重新打开。无需清除浏览器数据。
+
+## v1.2.0 更新
+
+- 启动、回到前台与联网时自动检测版本；支持立即更新、稍后和设置中手动检查。新 Service Worker 不再直接抢占旧版本，更新前等待资源就绪，保留全部本机台账与连接设置。
+- 应用内标志、桌面图标、Apple touch 图标和 maskable 图标换为用户提供的兴文站图片。iOS 已安装的旧主屏幕图标可能不会即时刷新；可先确认备份或云端同步成功，再重新添加主屏幕入口，重新连接并验证台账。
+- 预约弹窗固定背景，按 visualViewport 的高度及偏移定位；键盘弹出后只滚动表单内容以显示焦点字段，加入收起键盘入口，避免备注被保存栏和键盘挡住。
+- 首页与表单日期采用独立显示层，保留原生日历选择器，避免 Safari 英文日期编辑器的固有尺寸挤压布局。
+
+### 后续版本发布
+
+发布时同时更新 `package.json` / `package-lock.json`、`version.json`、`updates.js` 的 `APP_VERSION`、`sw.js` 的 `VERSION`，以及 HTML 和 manifest 资源 URL 的版本号，再运行 `npm test` 检查一致性。`version.json` 不进入离线缓存。
+
+从 v1.1 升级的首次操作：用 Safari 打开 `https://liziyaaa.github.io/dashi-shuttle/?v=1.2.0` 并刷新，完整加载后关闭并重新打开桌面应用。旧版没有提示更新的代码，首次需要手动刷新；后续版本由应用提示更新。无需清除浏览器数据。

@@ -1,6 +1,6 @@
 {
   "name": "dashi-shuttle",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "大石至兴文高铁站专线预约与收入台账",
@@ -10,6 +10,7 @@
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.1"
+    "@playwright/test": "^1.64.1",
+    "happy-dom": "^21.0.3"
   }
 }
