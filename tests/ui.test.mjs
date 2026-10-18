@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sheetGeometry, scrollDelta, displayDate } from '../ui.js';
+import { sheetGeometry, scrollDelta, displayDate, departurePassed } from '../ui.js';
 
 test('sheet stays inside the visible viewport across keyboard opening, panning and dismissal', () => {
   for (const layout of [568, 844, 932]) {
@@ -30,4 +30,14 @@ test('dates have a stable display independent of iOS system language', () => {
   assert.equal(displayDate('2026-10-18'), '2026年10月18日');
   assert.equal(displayDate('2026-01-02', true), '2026/01/02');
   assert.equal(displayDate(''), '选择日期');
+});
+
+test('departure styling uses local dates, hours and the exact departure boundary', () => {
+  const now = new Date(2026, 9, 18, 15, 30, 0);
+  assert.equal(departurePassed('2026-10-18', '15:00', now), true);
+  assert.equal(departurePassed('2026-10-18', '16:00', now), false);
+  assert.equal(departurePassed('2026-10-17', '21:00', now), true);
+  assert.equal(departurePassed('2026-10-19', '07:00', now), false);
+  assert.equal(departurePassed('2026-10-18', '15:00', new Date(2026, 9, 18, 15, 0, 0)), false);
+  assert.equal(departurePassed('2026-10-18', '15:00', new Date(2026, 9, 18, 15, 0, 1)), true);
 });

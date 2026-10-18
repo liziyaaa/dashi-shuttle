@@ -16,3 +16,8 @@ export function displayDate(value, compact = false) {
   const [year, month, day] = value.split('-');
   return compact ? `${year}/${month}/${day}` : `${year}年${Number(month)}月${Number(day)}日`;
 }
+// Interpret departure times in the phone's local timezone, as the native date
+// controls and the rest of the ledger do. Do not convert them through UTC.
+export function departurePassed(date, hour, now = new Date()) {
+  return new Date(`${date}T${hour}:00`).getTime() < now.getTime();
+}

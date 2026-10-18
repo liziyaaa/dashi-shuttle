@@ -1,9 +1,9 @@
-import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.0';
-import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.0';
-import { sheetGeometry, scrollDelta, displayDate } from './ui.js?v=1.3.0';
-import { APP_VERSION, startUpdates } from './updates.js?v=1.3.0';
+import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.1';
+import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.1';
+import { sheetGeometry, scrollDelta, displayDate, departurePassed } from './ui.js?v=1.3.1';
+import { APP_VERSION, startUpdates } from './updates.js?v=1.3.1';
 
-import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.0';
+import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.1';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -31,7 +31,8 @@ let storageIssue = '';
 let connection = null;
 try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) data = validateData(JSON.parse(raw)); } catch { storageIssue = '本机旧记录无法读取，已保留原始内容。请先导出原始备份，再处理数据。当前已停止写入，避免覆盖。'; }
 try { const raw = localStorage.getItem(SYNC_KEY); if (raw) connection = validateConnection({ ...JSON.parse(raw), repo: DATA_REPO }); } catch { /* Invalid connection never blocks local records. */ }
-let state = { page: 'bookings', date: localDate(), hour: nextHour(), direction: 'outbound', filter: 'all', search: '' };
+let state = { page: 'bookings', date: localDate(), hour: nextHour(), allDay: true, direction: 'outbound', filter: 'all', search: '' };
+let lastLocalDay = localDate();
 let syncStatus = connection ? '等待同步' : '未连接云端';
 let lastSynced = '';
 let syncError = '';
@@ -185,27 +186,35 @@ function incomeCard(summary, label = '今日实收', action = true) { return `<s
 function footnote() { return `<p class="footnote">${icon(connection ? 'cloud' : 'shield')}${connection ? '联网自动同步 · 无网也能继续登记' : '记录保存在本机 · 在设置中连接多人同步'}</p>`; }
 function bookingsPage() {
   const day = summarize(data, state.date);
-  const trip = summarize(data, state.date, state.hour, state.direction);
-  let rows = live(data.bookings).filter(row => row.date === state.date && row.hour === state.hour && row.direction === state.direction);
+  const trip = summarize(data, state.date, state.allDay ? undefined : state.hour, state.direction);
+  const now = new Date();
+  let rows = live(data.bookings).filter(row => row.date === state.date && (state.allDay || row.hour === state.hour) && row.direction === state.direction);
   if (state.filter !== 'all') rows = rows.filter(row => row.status === state.filter);
   const query = state.search.trim().toLowerCase();
   if (query) rows = rows.filter(row => [row.name, row.phone, row.pickup, row.stop, row.note].some(value => value.toLowerCase().includes(query)));
-  rows.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  rows.sort((a, b) => a.hour.localeCompare(b.hour) || a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
   return `${heading(state.date === localDate() ? '今天的行程' : '预约台账')}
   ${!connection ? `<div class="sync-hint"><span>${icon('cloud')} 尚未开启多人同步</span><button class="text-button" data-page="settings">设置 ›</button></div>` : ''}
   <div class="overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收')}<section class="day-card"><div class="day-card-head"><h3>当日预约</h3><span class="route-pill">往返专线</span></div><div class="day-counts"><div><strong>${day.passengers}<small>人</small></strong><p>预约乘客</p></div><div><strong>${day.waiting}<small>人</small></strong><p>等待上车</p></div></div><div class="route-line"><b>大石</b><i></i><b>马岭</b><i></i><b>江门</b><i></i><span class="station">兴文高铁站</span></div></section></div>
   <div class="toolbar">${directionControls()}<span class="toolbar-note">07:00—21:00 · 每小时一班</span></div>
-  <section class="schedule-wrap"><div class="section-caption"><span>选择发车班次</span><small>时间为始发站发车时间</small></div><div class="hours" aria-label="班次">${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<button class="hour ${state.hour === hour ? 'active' : ''} ${s.count ? 'has-bookings' : ''}" data-hour="${hour}" aria-pressed="${state.hour === hour}"><strong>${hour}</strong><small>${s.passengers ? s.passengers + ' 人预约' : '暂无预约'}</small></button>`; }).join('')}</div></section>
-  <div class="list-heading"><div class="list-title"><h2>${state.hour} 乘客</h2><span>${state.direction === 'return' ? '返回大石' : '开往高铁站'}</span></div><button class="button primary compact" data-action="add">${icon('plus')} 新增预约</button></div>
-  <div class="search-bar">${icon('search')}<input id="passenger-search" type="search" placeholder="查找本班的电话、称呼、上车点" aria-label="查找本班乘客" value="${esc(state.search)}" autocomplete="off"></div>
+  <section class="schedule-wrap"><div class="section-caption"><span>选择发车班次</span><small>时间为始发站发车时间</small></div><div class="hours" aria-label="班次">${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<button class="hour ${!state.allDay && state.hour === hour ? 'active' : ''} ${s.count ? 'has-bookings' : ''}" data-hour="${hour}" aria-pressed="${!state.allDay && state.hour === hour}"><strong>${hour}</strong><small>${s.passengers ? s.passengers + ' 人预约' : '暂无预约'}</small></button>`; }).join('')}</div></section>
+  <div class="list-heading"><div class="list-title"><h2>${state.allDay ? (state.date === localDate() ? '今日乘客' : '当日乘客') : state.hour + ' 乘客'}</h2><span>${state.direction === 'return' ? '返回大石' : '开往高铁站'}${state.allDay ? ' · 全部班次' : ''}</span></div><button class="button primary compact" data-action="add">${icon('plus')} 新增预约</button></div>
+  <div class="search-bar">${icon('search')}<input id="passenger-search" type="search" placeholder="查找${state.allDay ? '当天' : '本班'}的电话、称呼、上车点" aria-label="查找${state.allDay ? '当天' : '本班'}乘客" value="${esc(state.search)}" autocomplete="off"></div>
   <div class="filter-tabs" aria-label="乘车状态">${[['all','全部'],['booked','待上车'],['boarded','已上车'],['cancelled','已取消']].map(([key,label]) => `<button data-filter="${key}" class="${state.filter === key ? 'active' : ''}" aria-pressed="${state.filter === key}">${label}</button>`).join('')}</div>
-  <div class="trip-summary"><span>本班预约 <b>${trip.passengers}</b> 人 · 待接 <b>${trip.waiting}</b> 人</span><span>实收 <b>¥${money(trip.received)}</b></span></div>
-  <div class="booking-list">${rows.length ? ['大石', '马岭', '江门', '兴文高铁站'].map(stop => { const group = rows.filter(row => row.stop === stop); return group.length ? `<section class="stop-group"><div class="stop-heading"><i class="stop-dot"></i>${stop}<small>${group.filter(row => row.status !== 'cancelled').reduce((n,row) => n+row.passengers,0)} 人</small></div>${group.map(bookingCard).join('')}</section>` : ''; }).join('') : `<section class="empty-state" style="grid-column:1/-1"><div class="empty-icon">${icon('bus')}</div><h3>${query ? '本班没有匹配的乘客' : state.filter === 'all' ? '这一班，还没有预约' : '暂无' + ({ booked:'待上车', boarded:'已上车', cancelled:'已取消' }[state.filter]) + '记录'}</h3><p>${query ? '试试其他电话、称呼或上车地点' : '接到乘客电话，随手记下就安心。'}</p>${!query ? `<button class="button secondary" data-action="add">${icon('plus')} 记一笔预约</button>` : ''}</section>`}</div>
+  <div class="trip-summary"><span>${state.allDay ? '当天' : '本班'}预约 <b>${trip.passengers}</b> 人 · 待接 <b>${trip.waiting}</b> 人</span><span>实收 <b>¥${money(trip.received)}</b></span></div>
+  <div class="booking-list">${rows.length ? passengerGroups(rows, now) : `<section class="empty-state" style="grid-column:1/-1"><div class="empty-icon">${icon('bus')}</div><h3>${query ? (state.allDay ? '当天没有匹配的乘客' : '本班没有匹配的乘客') : state.filter === 'all' ? (state.allDay ? '当天还没有预约' : '这一班，还没有预约') : '暂无' + ({ booked:'待上车', boarded:'已上车', cancelled:'已取消' }[state.filter]) + '记录'}</h3><p>${query ? '试试其他电话、称呼或上车地点' : '接到乘客电话，随手记下就安心。'}</p>${!query ? `<button class="button secondary" data-action="add">${icon('plus')} 记一笔预约</button>` : ''}</section>`}</div>
   ${footnote()}`;
 }
-function bookingCard(row) {
+function passengerGroups(rows, now) {
+  const groups = state.allDay ? HOURS.map(hour => ({ hour, rows: rows.filter(row => row.hour === hour) })).filter(group => group.rows.length) : [{ hour: state.hour, rows }];
+  return groups.map(group => `<section class="departure-group" data-departure-hour="${group.hour}">${state.allDay ? `<div class="departure-heading ${departurePassed(state.date, group.hour, now) ? 'past-trip' : ''}"><strong>${group.hour}</strong><small>${departurePassed(state.date, group.hour, now) ? '已过发车时间' : '待发车'}</small></div>` : ''}${['大石', '马岭', '江门', '兴文高铁站'].map(stop => {
+    const passengers = group.rows.filter(row => row.stop === stop);
+    return passengers.length ? `<section class="stop-group"><div class="stop-heading"><i class="stop-dot"></i>${stop}<small>${passengers.filter(row => row.status !== 'cancelled').reduce((n, row) => n + row.passengers, 0)} 人</small></div>${passengers.map(row => bookingCard(row, now)).join('')}</section>` : '';
+  }).join('')}</section>`).join('');
+}
+function bookingCard(row, now = new Date()) {
   const status = { booked: '待上车', boarded: '已上车', cancelled: '已取消' }[row.status];
-  return `<article class="booking-card ${row.status === 'cancelled' ? 'cancelled' : ''}" data-record="${esc(row.id)}"><div class="booking-top"><div class="passenger">${esc(row.name || '预约乘客')}<small>${row.passengers} 人 · ¥${money(row.passengers * row.fare)}</small></div><span class="status ${row.status}">${status}</span></div><div class="pickup">${icon('pin')}<span>${esc(row.pickup)}</span></div>${row.note ? `<p class="booking-note">${esc(row.note)}</p>` : ''}<div class="booking-bottom"><a class="phone-link" href="tel:${esc(row.phone.replace(/[^+\d]/g,''))}" aria-label="拨打 ${esc(row.phone)}">${icon('phone')}${esc(row.phone)}</a><div class="booking-actions">${row.status !== 'cancelled' ? `${row.status === 'booked' ? `<button class="chip-button" data-board="${esc(row.id)}">标记上车</button>` : ''}<button class="chip-button ${row.paid ? 'paid' : 'emphasized'}" data-paid="${esc(row.id)}">${row.paid ? '已收款' : '收款'}</button>` : ''}<button class="icon-button edit-button" data-edit="${esc(row.id)}" aria-label="编辑 ${esc(row.name || row.phone)}">${icon('edit')}</button></div></div></article>`;
+  return `<article class="booking-card ${row.status === 'cancelled' ? 'cancelled' : ''} ${state.allDay && departurePassed(row.date, row.hour, now) ? 'past-departure' : ''}" data-record="${esc(row.id)}"><div class="booking-top"><div class="passenger">${esc(row.name || '预约乘客')}${state.allDay ? `<time class="departure-time" datetime="${row.date}T${row.hour}">${row.hour}</time>` : ''}<small>${row.passengers} 人 · ¥${money(row.passengers * row.fare)}</small></div><span class="status ${row.status}">${status}</span></div><div class="pickup">${icon('pin')}<span>${esc(row.pickup)}</span></div>${row.note ? `<p class="booking-note">${esc(row.note)}</p>` : ''}<div class="booking-bottom"><a class="phone-link" href="tel:${esc(row.phone.replace(/[^+\d]/g,''))}" aria-label="拨打 ${esc(row.phone)}">${icon('phone')}${esc(row.phone)}</a><div class="booking-actions">${row.status !== 'cancelled' ? `${row.status === 'booked' ? `<button class="chip-button" data-board="${esc(row.id)}">标记上车</button>` : ''}<button class="chip-button ${row.paid ? 'paid' : 'emphasized'}" data-paid="${esc(row.id)}">${row.paid ? '已收款' : '收款'}</button>` : ''}<button class="icon-button edit-button" data-edit="${esc(row.id)}" aria-label="编辑 ${esc(row.name || row.phone)}">${icon('edit')}</button></div></div></article>`;
 }
 function incomePage() {
   const day = summarize(data, state.date);
@@ -216,7 +225,7 @@ function incomePage() {
   <div class="income-overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收', false)}<div class="metric-panel"><div class="metric-row"><span>预约应收</span><strong>¥${money(day.expected)}</strong></div><div class="metric-row"><span>预约未收</span><strong>¥${money(day.unpaid)}</strong></div><div class="metric-row"><span>补记实收</span><strong>¥${money(day.extra)}</strong></div></div></div>
   <section class="panel"><div class="list-heading"><h3>一天的收入节奏</h3><span class="muted">往返合计 · 实收</span></div><div class="bar-chart" aria-label="各班次往返实收收入">${HOURS.map(hour => { const sum = summarize(data, state.date, hour); return `<div class="bar-column" title="${hour} 实收 ¥${money(sum.received)}"><div class="bar ${sum.received ? 'has-income' : ''}" style="height:${Math.max(3, sum.received / max * 90)}px"></div><small>${hour.slice(0,2)}时</small></div>`; }).join('')}</div></section>
   <div class="list-heading"><h2>班次账单</h2><div class="header-action"><button class="button secondary" data-action="csv">${icon('download')} 导出</button><button class="button primary" data-action="extra">${icon('plus')} 补记收入</button></div></div><div class="toolbar">${directionControls()}</div>
-  <section class="panel" style="margin-top:0;padding-top:6px"><div class="table-scroll"><table class="trip-table"><thead><tr><th>始发班次</th><th>人数</th><th>待收</th><th>补记</th><th>实收（元）</th></tr></thead><tbody>${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<tr><td><button class="text-button" data-view-trip="${hour}">${hour}</button></td><td>${s.passengers}</td><td>${money(s.unpaid)}</td><td>${money(s.extra)}</td><td class="money-cell">${money(s.received)}</td></tr>`; }).join('')}</tbody><tfoot><tr><td>本方向合计</td><td>${dir.passengers}</td><td>${money(dir.unpaid)}</td><td>${money(dir.extra)}</td><td class="money-cell">${money(dir.received)}</td></tr></tfoot></table></div><p class="backup-note">实收 = 已全额收款的有效预约 + 补记收入。已取消预约不计入。</p></section>
+  <section class="panel" style="margin-top:0;padding-top:6px"><div class="table-scroll"><table class="trip-table"><thead><tr><th>始发班次</th><th>人数</th><th>待收</th><th>补记</th><th>实收（元）</th></tr></thead><tbody>${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<tr><td><button class="text-button" data-view-trip="${hour}">${hour}</button></td><td>${s.passengers}</td><td>${money(s.unpaid)}</td><td>${money(s.extra)}</td><td class="money-cell">${money(s.received)}</td></tr>`; }).join('')}</tbody><tfoot><tr><td>本方向合计</td><td>${dir.passengers}</td><td>${money(dir.unpaid)}</td><td>${money(dir.extra)}</td><td class="money-cell">${money(dir.received)}</td></tr></tfoot></table></div></section>
   ${extras.length ? `<section class="panel"><h3>当日补记明细</h3>${extras.map(row => `<div class="extras-row"><div>${esc(row.note)}<small>${row.hour} · ${row.direction === 'return' ? '返回大石' : '开往高铁站'}</small></div><div><b>¥${money(row.amount)}</b><button class="icon-button edit-button" data-delete-extra="${esc(row.id)}" aria-label="删除补记收入 ${esc(row.note)}">${icon('trash')}</button></div></div>`).join('')}</section>` : ''}${footnote()}`;
 }
 function settingsPage() {
@@ -231,6 +240,9 @@ function renderSyncState() {
   if (error) { error.textContent = syncError; error.hidden = !syncError; }
 }
 function render() {
+  const today = localDate();
+  if (state.allDay && state.date === lastLocalDay && today !== lastLocalDay) { state.date = today; state.hour = nextHour(); }
+  lastLocalDay = today;
   const activeForm = document.activeElement?.closest('#sync-form, #fares-form');
   const activeField = activeForm ? document.activeElement.name : null;
   const formValues = activeForm ? [...activeForm.elements].filter(el => el.name).map(el => ({ name: el.name, value: el.value, checked: el.checked })) : null;
@@ -242,7 +254,7 @@ function render() {
   document.querySelectorAll('.bottom-nav [data-page]').forEach(button => { button.classList.toggle('active', button.dataset.page === state.page); button.setAttribute('aria-current', button.dataset.page === state.page ? 'page' : 'false'); });
   if (focused && $('#passenger-search')) { $('#passenger-search').focus(); $('#passenger-search').setSelectionRange(selection, selection); }
   if (activeForm && formValues) { const replacement = $('#' + activeForm.id); if (replacement) { for (const entry of formValues) { const input = replacement.elements[entry.name]; if (input) { input.value = entry.value; if (input.type === 'checkbox') input.checked = entry.checked; } } replacement.elements[activeField]?.focus(); } }
-  if ($('.hours')) { if (hoursScroll !== undefined) $('.hours').scrollLeft = hoursScroll; else $('.hour.active')?.scrollIntoView({ block: 'nearest', inline: 'center' }); }
+  if ($('.hours')) { if (hoursScroll !== undefined) $('.hours').scrollLeft = hoursScroll; else ($('.hour.active') || $(`.hour[data-hour="${state.hour}"]`))?.scrollIntoView({ block: 'nearest', inline: 'center' }); }
   updateBadge();
   refreshDateDisplays();
   if ($('#sync-summary')) $('#sync-summary').textContent = syncStatus;
@@ -342,7 +354,11 @@ document.addEventListener('click', event => {
   const button = event.target.closest('button'); if (!button) return;
   if (button.dataset.close) return closeDialog(button.dataset.close);
   if (button.dataset.page) { state.page = button.dataset.page; state.search = ''; render(); $('#page-scroll').scrollTo(0, 0); return; }
-  if (button.dataset.hour) { state.hour = button.dataset.hour; state.search = ''; render(); return; }
+  if (button.dataset.hour) {
+    if (!state.allDay && state.hour === button.dataset.hour) { state.allDay = true; state.date = localDate(); state.hour = nextHour(); }
+    else { state.allDay = false; state.hour = button.dataset.hour; }
+    state.search = ''; state.filter = 'all'; render(); return;
+  }
   if (button.dataset.direction) { state.direction = button.dataset.direction; render(); return; }
   if (button.dataset.filter) { state.filter = button.dataset.filter; render(); return; }
   if (button.dataset.edit) return openBooking(button.dataset.edit);
@@ -351,7 +367,7 @@ document.addEventListener('click', event => {
     const row = live(data.bookings).find(row => row.id === button.dataset.paid); if (!row) return;
     confirm(row.paid ? '撤销这笔收款？' : `确认已收到 ¥${money(row.fare * row.passengers)}？`, row.paid ? '撤销后，本单会恢复为未收款，并从实收中扣除。' : `${row.name || row.phone} · ${row.passengers} 人。本单将按全额计入 ${row.date} ${row.hour} 班次实收。`, () => { if (updateRecord('bookings', row.id, { paid: !row.paid })) toast(row.paid ? '已撤销收款' : '收款已记入台账'); }); return;
   }
-  if (button.dataset.viewTrip) { state.hour = button.dataset.viewTrip; state.page = 'bookings'; state.filter = 'all'; state.search = ''; render(); $('#page-scroll').scrollTo(0, 0); return; }
+  if (button.dataset.viewTrip) { state.hour = button.dataset.viewTrip; state.allDay = false; state.page = 'bookings'; state.filter = 'all'; state.search = ''; render(); $('#page-scroll').scrollTo(0, 0); return; }
   if (button.dataset.deleteExtra) { const row = data.extras.find(row => row.id === button.dataset.deleteExtra); confirm('删除这笔补记收入？', `¥${money(row.amount)} · ${row.note}。删除后会同步从收入中扣除。`, () => { if (updateRecord('extras', row.id, { deleted: true })) toast('已删除补记收入'); }, true); return; }
   const action = button.dataset.action;
   if (action === 'add') openBooking();
@@ -437,3 +453,6 @@ const updates = startUpdates({ notify: toast, canReload: () => !document.querySe
 render();
 if (connection) runSync();
 setInterval(() => { if (document.visibilityState === 'visible' && !$('#booking-dialog').open && !$('#extra-dialog').open) { const meta = localSyncState(); runSync(false, hasPending(meta.pending) && Date.now() >= meta.since + UPLOAD_DELAY ? 'full' : hasPending(meta.pending) ? 'pull' : 'full'); } }, PULL_INTERVAL);
+
+// Keep local-time departure styling current without interrupting text entry.
+setInterval(() => { if (document.visibilityState === 'visible' && state.page === 'bookings' && state.allDay && !document.querySelector('dialog[open]') && !document.activeElement?.matches('input, textarea, select')) render(); }, 60000);

@@ -387,3 +387,17 @@ body.booking-open .page-scroll { overflow-y: hidden; }
 .sync-toolbar .text-button { flex-shrink: 0; }
 #history-status { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
 #history-status:empty { display: none; }
+.departure-group { min-width: 0; grid-column: 1 / -1; }
+.departure-heading { display: flex; align-items: baseline; gap: 9px; margin: 20px 4px 4px; color: var(--accent); }
+.departure-heading strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.departure-heading small { font-size: 11px; font-weight: 400; }
+.departure-heading.past-trip { color: var(--muted); }
+.departure-time { display: inline-block; margin-left: 8px; padding: 2px 6px; border-radius: 5px; background: var(--soft); color: var(--muted); font-size: 11px; font-weight: 500; white-space: nowrap; vertical-align: middle; font-variant-numeric: tabular-nums; }
+.booking-card.past-departure { background: #e9e9ee; color: #76767d; }
+.past-departure .phone-link { color: #76767d; }
+.past-departure .departure-time, .past-departure .status { background: #dedee4; color: #76767d; }
+.past-departure .chip-button.emphasized { background: #8e8e93; }
+@media (min-width: 760px) {
+  .departure-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 0 16px; }
+  .departure-heading, .departure-group > .stop-group:only-of-type { grid-column: 1 / -1; }
+}
