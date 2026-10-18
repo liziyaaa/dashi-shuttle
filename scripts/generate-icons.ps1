@@ -4,11 +4,11 @@ function New-ShuttleIcon([int]$size, [string]$name) {
   $bitmap = New-Object System.Drawing.Bitmap($size, $size)
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-  $graphics.Clear([System.Drawing.ColorTranslator]::FromHtml('#214f3f'))
+  $graphics.Clear([System.Drawing.ColorTranslator]::FromHtml('#007aff'))
   $scale = $size / 64.0
   $graphics.ScaleTransform($scale, $scale)
-  $light = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml('#edf1d7'))
-  $dark = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml('#214f3f'))
+  $light = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml('#ffffff'))
+  $dark = New-Object System.Drawing.SolidBrush([System.Drawing.ColorTranslator]::FromHtml('#007aff'))
   $graphics.FillRectangle($light, 18, 18, 28, 28)
   $graphics.FillEllipse($light, 18, 13, 10, 10)
   $graphics.FillEllipse($light, 36, 13, 10, 10)

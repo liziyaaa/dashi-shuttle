@@ -1,4 +1,4 @@
-# 大石专线 · 司机台账
+# 兴文高铁站专线 · 司机台账
 
 适合手机操作的专线车预约及收入管理应用，支持添加到桌面、离线登记和多人同步。
 
@@ -25,7 +25,7 @@ GitHub Pages 托管公开的程序，乘客电话和收入只存于手机本地�
 ### 首次连接（仓库所有者操作）
 
 1. 打开 GitHub 的 [创建细粒度令牌](https://github.com/settings/personal-access-tokens/new) 页面。
-2. 名称可填 `Dashi Shuttle`，资源所有者选择 `liziyaaa`，设置合适的过期时间。
+2. 名称可填 `Xingwen Shuttle`，资源所有者选择 `liziyaaa`，设置合适的过期时间。
 3. Repository access 选择 **Only select repositories**，**只选 `dashi-shuttle-data`**。
 4. Repository permissions 中将 **Contents** 设为 **Read and write**，其余保持默认；Metadata 的读取权限由 GitHub 自动授予。
 5. 生成后复制令牌。在应用「使用与设置 → 多人同步」中填仓库 `liziyaaa/dashi-shuttle-data` 和令牌，点「连接并同步」。
@@ -74,11 +74,19 @@ JSON 包含全部日期、联系方式、备注及收款情况，请妥善保管
 
 ```sh
 npm install
+npx playwright install webkit
 npm run dev
 npm test
 npm run test:e2e
 ```
 
-本地地址 `http://127.0.0.1:4173/`。应用本身零运行依赖，无需构建，也不加载外部 CDN 字体或脚本。浏览器测试使用电脑上已安装的 Chrome；如路径不同，可通过 `CHROME_PATH` 环境变量指定。
+本地地址 `http://127.0.0.1:4173/`。应用本身零运行依赖，无需构建，也不加载外部 CDN 字体或脚本。浏览器测试覆盖电脑上已安装的 Chrome 和 Playwright WebKit，包含小屏布局及模拟键盘缩小可视区域；WebKit 测试不等同于 iPhone 真机测试。Chrome 路径不同时，可通过 `CHROME_PATH` 环境变量指定。
 
 GitHub Pages 从 `main` 分支根目录发布；`.nojekyll` 禁用 Jekyll。项目根目录内不保存任何真实乘客数据或令牌。
+
+## v1.1 更新
+
+- 应用名统一为「兴文高铁站专线」，浅灰底、白色分组、蓝色操作按钮。
+- 修复 iOS 日期控件挤压班次的问题；小屏预约表单采用固定标题、滚动内容及固定保存按钮，并响应键盘造成的可视区域变化。
+- 保留原应用地址、存储标识与数据仓库，现有预约和连接设置无需迁移。
+- 样式、脚本和图标使用新资源版本；Service Worker 在新离线资源全部就绪后启用。若手机仍显示旧绿色界面，用 Safari 打开 `https://liziyaaa.github.io/dashi-shuttle/?v=1.1`，刷新并关闭旧应用窗口后重新打开。无需清除浏览器数据。

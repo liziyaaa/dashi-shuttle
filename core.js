@@ -11,7 +11,7 @@ export function validDate(value) { if (typeof value !== 'string' || !/^20\d{2}-\
 function isTimestamp(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value)); }
 function string(value, max) { return typeof value === 'string' && value.length <= max; }
 export function validateData(input) {
-  if (!input || input.schema !== 1 || !Array.isArray(input.bookings) || !Array.isArray(input.extras) || input.bookings.length > 50000 || input.extras.length > 50000) throw new Error('不是有效的大石专线备份文件');
+  if (!input || input.schema !== 1 || !Array.isArray(input.bookings) || !Array.isArray(input.extras) || input.bookings.length > 50000 || input.extras.length > 50000) throw new Error('不是有效的兴文高铁站专线备份文件');
   const data = freshData();
   const ids = new Set();
   for (const collection of ['bookings', 'extras']) {

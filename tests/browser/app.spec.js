@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
-test('phone booking, collect, daily totals, return fare, and persistence', async ({ page }) => {
+test('phone booking, collect, daily totals, return fare, and persistence', async ({ page }, testInfo) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: '今天的行程' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('mobile-home.png') });
   await page.locator('[data-hour="07:00"]').click();
   await page.getByRole('button', { name: '新增预约' }).click();
   const form = page.locator('#booking-form');
@@ -72,21 +73,50 @@ test('two independent phones sync through private GitHub API and offline additio
   let cloud = { schema: 1, bookings: [], extras: [], settings: { fares: { 大石: 0, 马岭: 4000, 江门: 2000, 兴文高铁站: 6000 }, returnEnabled: true, updatedAt: '2020-01-01T00:00:00.000Z' } }; let revision = 1;
   const phones = [];
   for (let i = 0; i < 2; i++) {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    // API mocks must bypass service workers. Offline caching is tested separately.
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
     await context.route('https://api.github.com/**', async route => {
       const req = route.request();
-      if (!req.url().includes('/contents/')) return route.fulfill({ json: { private: true, default_branch: 'main', archived: false } });
-      if (req.method() === 'GET') return route.fulfill({ json: { content: Buffer.from(JSON.stringify(cloud)).toString('base64'), sha: String(revision) } });
+      const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GitHub-Api-Version, Accept, Cache-Control, Pragma' };
+      if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (!req.url().includes('/contents/')) return route.fulfill({ headers, json: { private: true, default_branch: 'main', archived: false } });
+      if (req.method() === 'GET') return route.fulfill({ headers, json: { content: Buffer.from(JSON.stringify(cloud)).toString('base64'), sha: String(revision) } });
       const body = req.postDataJSON();
-      if (body.sha !== String(revision)) return route.fulfill({ status: 409, json: {} });
-      cloud = JSON.parse(Buffer.from(body.content, 'base64').toString()); revision++; return route.fulfill({ json: {} });
+      if (body.sha !== String(revision)) return route.fulfill({ status: 409, headers, json: {} });
+      cloud = JSON.parse(Buffer.from(body.content, 'base64').toString()); revision++; return route.fulfill({ headers, json: {} });
     });
-    const phone = await context.newPage(); await phone.goto('/'); await phone.locator('.bottom-nav [data-page="settings"]').click(); await phone.locator('#sync-form [name="token"]').fill('github_pat_test'); await phone.locator('#sync-form button[type="submit"]').click(); await expect(phone.locator('.sync-state')).toContainText('已同步'); phones.push({ context, phone });
+    const phone = await context.newPage();
+    await phone.goto('/'); await phone.locator('.bottom-nav [data-page="settings"]').click(); await phone.locator('#sync-form [name="token"]').fill('github_pat_test'); await phone.locator('#sync-form button[type="submit"]').click();
+    await expect(phone.locator('.sync-state')).toContainText('已同步'); phones.push({ context, phone });
   }
   const first = phones[0].phone; await first.locator('.bottom-nav [data-page="bookings"]').click(); await first.locator('[data-hour="09:00"]').click(); await first.getByRole('button', { name: '新增预约' }).click(); await first.locator('#booking-form [name="pickup"]').fill('测试同步地点'); await first.locator('#booking-form [name="phone"]').fill('13800000001'); await first.locator('#booking-form button[type="submit"]').click();
   await expect.poll(() => cloud.bookings.length).toBe(1);
   const second = phones[1].phone; await second.getByRole('button', { name: '立即同步 ↗' }).click(); await expect(second.locator('.sync-state')).toContainText('已同步'); await second.locator('.bottom-nav [data-page="bookings"]').click(); await second.locator('[data-hour="09:00"]').click(); await expect(second.locator('.booking-card')).toHaveCount(1);
   await phones[1].context.setOffline(true); await second.getByRole('button', { name: '新增预约' }).click(); await second.locator('#booking-form [name="pickup"]').fill('离线录入地点'); await second.locator('#booking-form [name="phone"]').fill('13800000002'); await second.locator('#booking-form button[type="submit"]').click(); await expect(second.locator('.booking-card')).toHaveCount(2); await phones[1].context.setOffline(false); await expect.poll(() => cloud.bookings.length).toBe(2);
   for (const { context } of phones) await context.close();
+});
+test('booking sheet prevents date overlap and keeps save visible on small phones', async ({ page }, testInfo) => {
+  await page.goto('/');
+  await expect(page).toHaveTitle('兴文高铁站专线 · 司机台账');
+  await expect(page.locator('.brand')).toContainText('兴文高铁站专线');
+  await page.getByRole('button', { name: '新增预约', exact: true }).click();
+  const dialog = page.locator('#booking-dialog');
+  const save = dialog.getByRole('button', { name: '保存预约' });
+  for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 430, height: 932 }, { width: 390, height: 420 }]) {
+    await page.setViewportSize(viewport);
+    await expect(save).toBeInViewport({ ratio: 1 });
+    const date = await dialog.locator('[name="date"]').boundingBox();
+    const hour = await dialog.locator('[name="hour"]').boundingBox();
+    expect(date.x + date.width <= hour.x + 1 || date.y + date.height <= hour.y + 1).toBeTruthy();
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBeTruthy();
+    expect(await dialog.locator('.sheet-body').evaluate(el => el.scrollHeight > el.clientHeight)).toBeTruthy();
+    await dialog.locator('[name="note"]').fill('滚动到表单底部，保存按钮仍应可见');
+    await expect(save).toBeInViewport({ ratio: 1 });
+    await expect(dialog.locator('#form-title')).toBeInViewport({ ratio: 1 });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await dialog.locator('[name="date"]').focus();
+  await dialog.locator('.sheet-body').evaluate(el => { el.scrollTop = 0; });
+  await page.screenshot({ path: testInfo.outputPath('mobile-booking.png') });
 });
 
