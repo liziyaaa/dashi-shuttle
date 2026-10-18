@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#214f3f">
+  <meta name="description" content="大石至兴文高铁站专线，随手记预约，清楚看收入。">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="大石专线">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="./styles.css">
+  <title>大石专线 · 司机台账</title>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="./" aria-label="大石专线首页"><img src="./icons/logo.svg" width="42" height="42" alt=""><span>大石专线<small>司机的随身台账</small></span></a>
+    <span class="local-badge" id="connection-status"><i></i> 本机保存</span>
+  </header>
+  <main id="app" class="app-main"></main>
+  <nav class="bottom-nav" aria-label="主导航">
+    <button data-page="bookings" class="active"><span data-icon="notebook"></span>预约台账</button>
+    <button data-page="income"><span data-icon="chart"></span>收入统计</button>
+    <button data-page="settings"><span data-icon="settings"></span>使用与设置</button>
+  </nav>
+  <dialog id="booking-dialog" class="sheet">
+    <form id="booking-form">
+      <div class="sheet-heading"><div><span class="eyebrow">PASSENGER BOOKING</span><h2 id="form-title">记一笔预约</h2></div><button type="button" class="icon-button" data-close="booking-dialog" aria-label="关闭">×</button></div>
+      <input type="hidden" name="id">
+      <div class="form-grid">
+        <label>乘车日期<input name="date" type="date" required min="2020-01-01" max="2100-12-31"></label>
+        <label>发车班次<select name="hour" required></select></label>
+      </div>
+      <label id="direction-field" hidden>行车方向<select name="direction"><option value="outbound">大石 → 兴文高铁站</option><option value="return">兴文高铁站 → 大石</option></select></label>
+      <fieldset><legend>上车地点</legend><div class="stop-options"><label><input type="radio" name="stop" value="大石"><span>大石</span></label><label><input type="radio" name="stop" value="马岭" checked><span>马岭</span></label><label><input type="radio" name="stop" value="江门"><span>江门</span></label><label class="return-stop" hidden><input type="radio" name="stop" value="兴文高铁站"><span>高铁站</span></label></div></fieldset>
+      <label>具体上车点<input name="pickup" maxlength="100" placeholder="例如：马岭农贸市场门口" required autocomplete="off"></label>
+      <div class="form-grid phone-grid"><label>联系电话<input name="phone" type="tel" inputmode="tel" maxlength="25" placeholder="方便出发前联系" required autocomplete="tel"></label><label>乘客称呼 <span class="optional">选填</span><input name="name" maxlength="30" placeholder="例如：王先生" autocomplete="name"></label></div>
+      <div class="form-grid"><label>乘车人数<input name="passengers" type="number" inputmode="numeric" min="1" max="99" value="1" required></label><label>每人票价（元）<input name="fare" type="number" inputmode="decimal" min="0" max="99999" step="0.01" placeholder="待确认可填 0" required></label></div>
+      <div class="form-total"><span>本单合计</span><strong id="form-total">¥0.00</strong></div>
+      <div class="form-grid"><label>乘车状态<select name="status"><option value="booked">待上车</option><option value="boarded">已上车</option><option value="cancelled">已取消</option></select></label><label>收款状态<select name="paid"><option value="no">尚未收款</option><option value="yes">已全额收款</option></select></label></div>
+      <label>备注 <span class="optional">选填</span><textarea name="note" rows="2" maxlength="300" placeholder="例如：带大件行李、两位老人同行"></textarea></label>
+      <p class="form-error" id="booking-error" role="alert"></p>
+      <div class="sheet-footer"><button type="button" class="button danger-light" id="delete-booking" hidden>删除</button><button type="submit" class="button primary grow">保存预约</button></div>
+    </form>
+  </dialog>
+  <dialog id="extra-dialog" class="sheet small-sheet"><form id="extra-form"><div class="sheet-heading"><div><span class="eyebrow">TRIP INCOME</span><h2>补记班次收入</h2></div><button type="button" class="icon-button" data-close="extra-dialog" aria-label="关闭">×</button></div><p class="muted">记录未预约乘客等额外实收，已收款的预约会自动计入，请勿重复记账。</p><label>日期<input name="date" type="date" required min="2020-01-01" max="2100-12-31"></label><label>班次<select name="hour" required></select></label><label id="extra-direction-field" hidden>方向<select name="direction"><option value="outbound">开往高铁站</option><option value="return">返回大石</option></select></label><label>实收金额（元）<input name="amount" type="number" min="0.01" max="999999" step="0.01" inputmode="decimal" required placeholder="0.00"></label><label>收入说明<input name="note" maxlength="100" placeholder="例如：临时上车 2 人" required></label><p class="form-error" id="extra-error" role="alert"></p><button class="button primary full" type="submit">保存收入</button></form></dialog>
+  <dialog id="confirm-dialog" class="sheet small-sheet"><div class="sheet-heading"><h2 id="confirm-title">请确认</h2><button class="icon-button" data-close="confirm-dialog" aria-label="关闭">×</button></div><p id="confirm-message"></p><div class="sheet-footer"><button class="button secondary" data-close="confirm-dialog">取消</button><button class="button primary" id="confirm-action">确定</button></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <noscript><p class="noscript">请启用 JavaScript 以使用预约台账。记录只保存在本机。</p></noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

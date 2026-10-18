@@ -1,0 +1,300 @@
+import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js';
+import { synchronize, validateConnection } from './sync.js';
+
+const $ = selector => document.querySelector(selector);
+const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const paths = {
+  notebook: '<rect x="5" y="3" width="15" height="18" rx="2"/><path d="M9 3v18M3 7h4M3 12h4M3 17h4m6-9h4m-4 4h4"/>',
+  chart: '<path d="M4 4v16h17M8 15v-4m5 4V6m5 9v-6"/>',
+  settings: '<path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h5l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3z"/><circle cx="11.5" cy="12" r="3"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  phone: '<path d="m5 3 4 4-2 3a15 15 0 0 0 7 7l3-2 4 4-2 3C10 22 2 14 2 5z"/>',
+  pin: '<path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2"/>',
+  edit: '<path d="m15 4 5 5M4 20l5-1L20 8a3.5 3.5 0 0 0-5-5L4 14z"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
+  wallet: '<path d="M20 8H5a3 3 0 0 1 0-6h13v6M3 5v14a2 2 0 0 0 2 2h15V8m0 5h-5v4h5"/>',
+  shield: '<path d="M12 3 3 6v6c0 5 9 9 9 9s9-4 9-9V6zM8 12l3 3 5-6"/>',
+  cloud: '<path d="M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5.5 5.5 0 0 1 0 11M9 14l3-3 3 3m-3-3v10"/>',
+  download: '<path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/>',
+  bus: '<rect x="5" y="3" width="14" height="16" rx="3"/><path d="M5 12h14M8 7h8M8 19v3m8-3v3M8 16h1m6 0h1"/>',
+  check: '<path d="m5 12 4 4L19 6"/>',
+  trash: '<path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7"/>'
+};
+const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.notebook}</svg>`;
+document.querySelectorAll('[data-icon]').forEach(el => el.innerHTML = icon(el.dataset.icon));
+let data = freshData();
+let storageIssue = '';
+let connection = null;
+try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) data = validateData(JSON.parse(raw)); } catch { storageIssue = '本机旧记录无法读取，已保留原始内容。请先导出原始备份，再处理数据。当前已停止写入，避免覆盖。'; }
+try { const raw = localStorage.getItem(SYNC_KEY); if (raw) connection = validateConnection(JSON.parse(raw)); } catch { /* Invalid connection never blocks local records. */ }
+let state = { page: 'bookings', date: localDate(), hour: nextHour(), direction: 'outbound', filter: 'all', search: '' };
+let syncStatus = connection ? '等待同步' : '未连接云端';
+let lastSynced = '';
+let syncing = false;
+let syncRequested = false;
+let syncTimer;
+let syncGeneration = 0;
+let activeSyncController;
+let installPrompt;
+let confirmAction;
+let toastTimer;
+let formDirty = false;
+let editingSnapshot = null;
+
+function toast(message) { $('#toast').textContent = message; $('#toast').classList.add('visible'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 3600); }
+function currentData() {
+  if (storageIssue) return data;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return raw ? mergeData(data, validateData(JSON.parse(raw))) : data;
+}
+function persist(next) {
+  if (storageIssue) throw new Error(storageIssue);
+  const safe = validateData(next);
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(safe)); } catch { throw new Error('手机存储空间不足或不允许保存，本次修改未保存。请导出备份后检查浏览器设置。'); }
+  data = safe;
+}
+function change(update) {
+  try { const next = structuredClone(currentData()); update(next); persist(next); render(); queueSync(); return true; }
+  catch (error) { toast(error.message); return false; }
+}
+function stamp(previous) { return new Date(Math.max(Date.now(), Date.parse(previous || '2000-01-01') + 1)).toISOString(); }
+function updateRecord(key, id, patch) {
+  return change(next => { const row = next[key].find(row => row.id === id); if (!row || row.deleted) throw new Error('这条记录已被删除，请刷新查看'); Object.assign(row, patch, { updatedAt: stamp(row.updatedAt) }); });
+}
+function queueSync() { if (!connection) return; syncRequested = true; clearTimeout(syncTimer); syncTimer = setTimeout(() => runSync(), 650); }
+async function runSync(manual = false) {
+  if (!connection || storageIssue) return;
+  if (syncing) { if (manual) syncRequested = true; return; }
+  if (!navigator.onLine) { syncStatus = '离线 · 等待上传'; updateBadge(); return; }
+  const generation = syncGeneration;
+  const config = { ...connection };
+  syncing = true; syncRequested = false; syncStatus = '正在同步…'; updateBadge();
+  activeSyncController = new AbortController();
+  const timeout = setTimeout(() => activeSyncController?.abort(), 25000);
+  try {
+    await synchronize(config, currentData, next => { if (generation !== syncGeneration) throw new Error('连接已更改'); persist(mergeData(currentData(), next)); }, activeSyncController.signal);
+    if (generation !== syncGeneration) return;
+    lastSynced = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    syncStatus = '已同步 ' + lastSynced;
+    if (manual) toast('已与云端同步');
+  } catch (error) {
+    if (generation !== syncGeneration) return;
+    syncStatus = '同步未完成';
+    if (manual) toast(error.name === 'AbortError' ? '网络连接超时，记录已保留在本机' : error.message);
+  } finally {
+    clearTimeout(timeout); syncing = false; activeSyncController = null;
+    if (generation === syncGeneration) { updateBadge(); render(); if (syncRequested) queueSync(); }
+  }
+}
+function updateBadge() {
+  const badge = $('#connection-status');
+  const offline = !navigator.onLine;
+  badge.classList.toggle('error', !!storageIssue || (connection && (syncStatus === '同步未完成' || offline)));
+  badge.innerHTML = `<i></i> ${esc(storageIssue ? '存储异常' : connection ? (offline ? '离线 · 本机保存' : syncStatus) : '本机保存')}`;
+}
+function dateControls() { return `<div class="date-control"><button class="icon-button" data-action="previous-date" aria-label="前一天">‹</button><input type="date" id="selected-date" aria-label="查看日期" min="2020-01-01" max="2100-12-31" value="${state.date}"><button class="icon-button" data-action="next-date" aria-label="后一天">›</button><button class="today-button" data-action="today">今天</button></div>`; }
+function dayName() { const date = new Date(state.date + 'T12:00:00'); const today = state.date === localDate(); return `${date.getMonth() + 1}月${date.getDate()}日 · ${today ? '今天，' : ''}${['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][date.getDay()]}`; }
+function heading(title, label, subtitle = '') { return `<div class="page-heading"><div><div class="eyebrow">${label}</div><h1>${title}</h1><p class="subtitle">${subtitle || dayName()}</p></div>${dateControls()}</div>`; }
+function directionControls() { return `<div class="segmented" aria-label="行车方向"><button data-direction="outbound" class="${state.direction === 'outbound' ? 'active' : ''}" aria-pressed="${state.direction === 'outbound'}">开往高铁站 ↗</button>${data.settings.returnEnabled ? `<button data-direction="return" class="${state.direction === 'return' ? 'active' : ''}" aria-pressed="${state.direction === 'return'}">返回大石 ↙</button>` : ''}</div>`; }
+function incomeCard(summary, label = '今日实收', action = true) { return `<section class="income-card" aria-label="${label}"><div class="card-label">${icon('wallet')} ${label}<span style="margin-left:auto;font-size:9px;opacity:.7">CNY</span></div><div class="income-value"><span class="currency">¥</span>${money(summary.received)}</div><div class="income-foot"><span>待收款 ¥${money(summary.unpaid)}</span>${action ? '<button data-page="income">查看明细 ↗</button>' : '<span>含补记收入</span>'}</div></section>`; }
+function footnote() { return `<p class="footnote">${icon(connection ? 'cloud' : 'shield')}${connection ? '联网自动同步 · 无网也能继续登记' : '记录保存在本机 · 在设置中连接多人同步'}</p>`; }
+function bookingsPage() {
+  const day = summarize(data, state.date);
+  const trip = summarize(data, state.date, state.hour, state.direction);
+  let rows = live(data.bookings).filter(row => row.date === state.date && row.hour === state.hour && row.direction === state.direction);
+  if (state.filter !== 'all') rows = rows.filter(row => row.status === state.filter);
+  const query = state.search.trim().toLowerCase();
+  if (query) rows = rows.filter(row => [row.name, row.phone, row.pickup, row.stop, row.note].some(value => value.toLowerCase().includes(query)));
+  rows.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  return `${heading(state.date === localDate() ? '今天的行程' : '预约台账', 'DASHI SHUTTLE · DRIVER')}
+  ${!connection ? `<div class="sync-hint"><span>${icon('cloud')} 多人一起用？先连接私有云台账</span><button class="text-button" data-page="settings">去连接 ↗</button></div>` : ''}
+  <div class="overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收')}<section class="day-card"><div class="day-card-head"><h3>当日预约</h3><span class="route-pill">往返专线</span></div><div class="day-counts"><div><strong>${day.passengers}<small>人</small></strong><p>预约乘客</p></div><div><strong>${day.waiting}<small>人</small></strong><p>等待上车</p></div></div><div class="route-line"><b>大石</b><i></i><b>马岭</b><i></i><b>江门</b><i></i><span class="station">兴文高铁站</span></div></section></div>
+  <div class="toolbar">${directionControls()}<span class="toolbar-note">07:00—21:00 · 每小时一班</span></div>
+  <section class="schedule-wrap"><div class="section-caption"><span>选择发车班次</span><small>时间为始发站发车时间</small></div><div class="hours" aria-label="班次">${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<button class="hour ${state.hour === hour ? 'active' : ''} ${s.count ? 'has-bookings' : ''}" data-hour="${hour}" aria-pressed="${state.hour === hour}"><strong>${hour}</strong><small>${s.passengers ? s.passengers + ' 人预约' : '暂无预约'}</small></button>`; }).join('')}</div></section>
+  <div class="list-heading"><div class="list-title"><h2>${state.hour} 乘客名单</h2><span>${state.direction === 'return' ? '返回大石' : '开往高铁站'}</span></div><button class="text-button" data-action="add">${icon('plus')} 记预约</button></div>
+  <div class="search-bar">${icon('search')}<input id="passenger-search" type="search" placeholder="查找本班的电话、称呼、上车点" aria-label="查找本班乘客" value="${esc(state.search)}" autocomplete="off"></div>
+  <div class="filter-tabs" aria-label="乘车状态">${[['all','全部'],['booked','待上车'],['boarded','已上车'],['cancelled','已取消']].map(([key,label]) => `<button data-filter="${key}" class="${state.filter === key ? 'active' : ''}" aria-pressed="${state.filter === key}">${label}</button>`).join('')}</div>
+  <div class="trip-summary"><span>本班预约 <b>${trip.passengers}</b> 人 · 待接 <b>${trip.waiting}</b> 人</span><span>实收 <b>¥${money(trip.received)}</b></span></div>
+  <div class="booking-list">${rows.length ? ['大石', '马岭', '江门', '兴文高铁站'].map(stop => { const group = rows.filter(row => row.stop === stop); return group.length ? `<section class="stop-group"><div class="stop-heading"><i class="stop-dot"></i>${stop}<small>${group.filter(row => row.status !== 'cancelled').reduce((n,row) => n+row.passengers,0)} 人</small></div>${group.map(bookingCard).join('')}</section>` : ''; }).join('') : `<section class="empty-state" style="grid-column:1/-1"><div class="empty-icon">${icon('bus')}</div><h3>${query ? '本班没有匹配的乘客' : state.filter === 'all' ? '这一班，还没有预约' : '暂无' + ({ booked:'待上车', boarded:'已上车', cancelled:'已取消' }[state.filter]) + '记录'}</h3><p>${query ? '试试其他电话、称呼或上车地点' : '接到乘客电话，随手记下就安心。'}</p>${!query ? `<button class="button secondary" data-action="add">${icon('plus')} 记一笔预约</button>` : ''}</section>`}</div>
+  ${footnote()}<button class="button primary add-floating" data-action="add">${icon('plus')} 新增预约</button>`;
+}
+function bookingCard(row) {
+  const status = { booked: '待上车', boarded: '已上车', cancelled: '已取消' }[row.status];
+  return `<article class="booking-card ${row.status === 'cancelled' ? 'cancelled' : ''}" data-record="${esc(row.id)}"><div class="booking-top"><div class="passenger">${esc(row.name || '预约乘客')}<small>${row.passengers} 人 · ¥${money(row.passengers * row.fare)}</small></div><span class="status ${row.status}">${status}</span></div><div class="pickup">${icon('pin')}<span>${esc(row.pickup)}</span></div>${row.note ? `<p class="booking-note">${esc(row.note)}</p>` : ''}<div class="booking-bottom"><a class="phone-link" href="tel:${esc(row.phone.replace(/[^+\d]/g,''))}" aria-label="拨打 ${esc(row.phone)}">${icon('phone')}${esc(row.phone)}</a><div class="booking-actions">${row.status !== 'cancelled' ? `${row.status === 'booked' ? `<button class="chip-button" data-board="${esc(row.id)}">标记上车</button>` : ''}<button class="chip-button ${row.paid ? 'paid' : 'emphasized'}" data-paid="${esc(row.id)}">${row.paid ? '已收款' : '收款'}</button>` : ''}<button class="icon-button edit-button" data-edit="${esc(row.id)}" aria-label="编辑 ${esc(row.name || row.phone)}">${icon('edit')}</button></div></div></article>`;
+}
+function incomePage() {
+  const day = summarize(data, state.date);
+  const dir = summarize(data, state.date, undefined, state.direction);
+  const max = Math.max(1, ...HOURS.map(hour => summarize(data, state.date, hour).received));
+  const extras = live(data.extras).filter(row => row.date === state.date).sort((a,b) => a.hour.localeCompare(b.hour));
+  return `${heading('收入统计', 'DAILY INCOME')}
+  <div class="income-overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收', false)}<div class="metric-panel"><div class="metric-row"><span>预约应收</span><strong>¥${money(day.expected)}</strong></div><div class="metric-row"><span>预约未收</span><strong>¥${money(day.unpaid)}</strong></div><div class="metric-row"><span>补记实收</span><strong>¥${money(day.extra)}</strong></div></div></div>
+  <section class="panel"><div class="list-heading"><h3>一天的收入节奏</h3><span class="muted">往返合计 · 实收</span></div><div class="bar-chart" aria-label="各班次往返实收收入">${HOURS.map(hour => { const sum = summarize(data, state.date, hour); return `<div class="bar-column" title="${hour} 实收 ¥${money(sum.received)}"><div class="bar ${sum.received ? 'has-income' : ''}" style="height:${Math.max(3, sum.received / max * 90)}px"></div><small>${hour.slice(0,2)}时</small></div>`; }).join('')}</div></section>
+  <div class="list-heading"><h2>班次账单</h2><div class="header-action"><button class="button secondary" data-action="csv">${icon('download')} 导出</button><button class="button primary" data-action="extra">${icon('plus')} 补记收入</button></div></div><div class="toolbar">${directionControls()}</div>
+  <section class="panel" style="margin-top:0;padding-top:6px"><div class="table-scroll"><table class="trip-table"><thead><tr><th>始发班次</th><th>人数</th><th>待收</th><th>补记</th><th>实收（元）</th></tr></thead><tbody>${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<tr><td><button class="text-button" data-view-trip="${hour}">${hour}</button></td><td>${s.passengers}</td><td>${money(s.unpaid)}</td><td>${money(s.extra)}</td><td class="money-cell">${money(s.received)}</td></tr>`; }).join('')}</tbody><tfoot><tr><td>本方向合计</td><td>${dir.passengers}</td><td>${money(dir.unpaid)}</td><td>${money(dir.extra)}</td><td class="money-cell">${money(dir.received)}</td></tr></tfoot></table></div><p class="backup-note">实收 = 已全额收款的有效预约 + 补记收入。已取消预约不计入。</p></section>
+  ${extras.length ? `<section class="panel"><h3>当日补记明细</h3>${extras.map(row => `<div class="extras-row"><div>${esc(row.note)}<small>${row.hour} · ${row.direction === 'return' ? '返回大石' : '开往高铁站'}</small></div><div><b>¥${money(row.amount)}</b><button class="icon-button edit-button" data-delete-extra="${esc(row.id)}" aria-label="删除补记收入 ${esc(row.note)}">${icon('trash')}</button></div></div>`).join('')}</section>` : ''}${footnote()}`;
+}
+function settingsPage() {
+  return `<div class="page-heading"><div><div class="eyebrow">YOUR POCKET LEDGER</div><h1>用得顺手，跑得安心。</h1><p class="subtitle">多人共用一份台账，把它放到手机桌面。</p></div></div>
+  <div class="settings-grid"><div><section class="panel settings-panel"><div class="panel-title">${icon('cloud')}<h3>多人同步</h3></div><p>所有司机连接同一个私有仓库。联网时每 45 秒检查更新，记账后自动同步；离线记录会在联网后上传。</p><div class="sync-state"><span>${connection ? esc(connection.repo) + '<br>' + esc(syncStatus) : '尚未连接 · 当前记录仅在本机'}</span>${connection ? '<button class="text-button" data-action="sync">立即同步 ↗</button>' : ''}</div><form id="sync-form"><label>私有数据仓库<input name="repo" required value="${esc(connection?.repo || 'liziyaaa/dashi-shuttle-data')}" spellcheck="false" autocapitalize="none" autocomplete="off"></label><label>连接密钥（细粒度令牌）<input name="token" type="password" ${connection ? '' : 'required'} placeholder="${connection ? '留空保留当前密钥' : 'github_pat_…'}" autocomplete="off" spellcheck="false"></label><p>密钥只保存在当前手机。请只授权数据仓库的 <b>Contents: Read and write</b>，不要使用有其他仓库权限的令牌。</p><button class="button primary" type="submit">${connection ? '更新连接' : '连接并同步'}</button>${connection ? ' <button type="button" class="button secondary" data-action="disconnect">断开连接</button>' : ''}</form><p><a class="inline-link" href="https://github.com/settings/personal-access-tokens/new?name=Dashi%20Shuttle&amp;description=Private%20shuttle%20ledger%20sync" target="_blank" rel="noopener noreferrer">到 GitHub 创建细粒度令牌 ↗</a> · <a class="inline-link" href="https://github.com/liziyaaa/dashi-shuttle/blob/main/README.md#多人同步" target="_blank" rel="noopener noreferrer">连接步骤 ↗</a></p><p>同一笔记录同时被编辑时，保留更新时间较新的版本。密钥过期后本机仍可记账，请及时更换。</p></section>
+  <section class="panel"><div class="panel-title">${icon('wallet')}<h3>默认票价</h3></div><p>单位：元 / 人。仅用于新预约，已有预约金额不受影响。</p><form id="fares-form"><div class="fare-grid">${Object.entries(data.settings.fares).map(([stop,fare]) => `<label>${stop === '兴文高铁站' ? '高铁站 → 大石' : stop + ' → 高铁站'}<input name="${stop}" type="number" min="0" max="99999" step="0.01" inputmode="decimal" required value="${(fare / 100).toFixed(2)}"></label>`).join('')}</div><label class="checkbox-label"><input name="returnEnabled" type="checkbox" ${data.settings.returnEnabled ? 'checked' : ''}>显示高铁站返回大石的班次</label><p>两个方向均暂按 07:00—21:00 整点始发。大石去程票价尚未确认，默认为 0，请按实际票价修改。</p><button class="button secondary" type="submit">保存设置</button></form></section></div>
+  <div><section class="panel"><div class="panel-title">${icon('shield')}<h3>备份与恢复</h3></div><p>更换手机或清理浏览器前，先备份。备份包含全部日期的预约、电话、收入及票价设置，请妥善保管。</p><button class="button secondary full" data-action="backup">${icon('download')} 导出全部记录（JSON）</button><button class="button secondary full" data-action="import">恢复 / 合并备份</button><input type="file" id="import-file" accept=".json,application/json" hidden><p class="backup-note">恢复会合并记录，保留较新的修改。连接密钥不会放进备份；导入后会同步到已连接的云端。</p>${storageIssue ? '<button class="button secondary full" data-action="raw-backup">导出无法读取的原始记录</button>' : ''}</section>
+  <section class="panel"><div class="panel-title">${icon('bus')}<h3>添加到手机桌面</h3></div><p>从桌面直接打开，像一个日常使用的小应用。首次完整打开后，断网也能记预约。</p><ol class="install-steps"><li><span><b>苹果手机</b><br>用 Safari 打开页面，点击分享，选择「添加到主屏幕」。</span></li><li><span><b>安卓手机</b><br>用 Chrome 或 Edge 打开，在浏览器菜单选择「安装应用」或「添加到主屏幕」。</span></li><li><span><b>先打开应用，再连接云台账</b><br>桌面应用可能使用独立存储，请在桌面应用内完成连接并确认同步成功。</span></li></ol><button class="button primary full" id="install-button" data-action="install" ${installPrompt ? '' : 'hidden'}>安装大石专线</button></section>
+  <section class="panel"><h3>记账小提示</h3><p>① 接到电话后，选择日期、方向和班次录入。<br>② 接到人后标记上车，收到钱后再点「收款」。<br>③ 没有预约的临时乘客，在收入统计中补记。<br>④ 预约取消后，不再计入人数和收入；若已收款，请线下核实退款。</p></section></div></div><p class="app-version">大石专线 · 司机台账 v1.0</p>`;
+}
+function render() {
+  const activeForm = document.activeElement?.closest('#sync-form, #fares-form');
+  const activeField = activeForm ? document.activeElement.name : null;
+  const formValues = activeForm ? [...activeForm.elements].filter(el => el.name).map(el => ({ name: el.name, value: el.value, checked: el.checked })) : null;
+  const search = $('#passenger-search');
+  const focused = document.activeElement === search;
+  const selection = focused ? search.selectionStart : 0;
+  const hoursScroll = $('.hours')?.scrollLeft;
+  $('#app').innerHTML = `${storageIssue ? `<div class="storage-warning" role="alert">${esc(storageIssue)}</div>` : ''}` + ({ bookings: bookingsPage, income: incomePage, settings: settingsPage }[state.page])();
+  document.querySelectorAll('.bottom-nav [data-page]').forEach(button => { button.classList.toggle('active', button.dataset.page === state.page); button.setAttribute('aria-current', button.dataset.page === state.page ? 'page' : 'false'); });
+  if (focused && $('#passenger-search')) { $('#passenger-search').focus(); $('#passenger-search').setSelectionRange(selection, selection); }
+  if (activeForm && formValues) { const replacement = $('#' + activeForm.id); if (replacement) { for (const entry of formValues) { const input = replacement.elements[entry.name]; if (input) { input.value = entry.value; if (input.type === 'checkbox') input.checked = entry.checked; } } replacement.elements[activeField]?.focus(); } }
+  if ($('.hours')) { if (hoursScroll !== undefined) $('.hours').scrollLeft = hoursScroll; else $('.hour.active')?.scrollIntoView({ block: 'nearest', inline: 'center' }); }
+  updateBadge();
+}
+function confirm(title, message, action, destructive = false) {
+  $('#confirm-title').textContent = title; $('#confirm-message').textContent = message;
+  $('#confirm-action').className = 'button ' + (destructive ? 'danger-light' : 'primary');
+  confirmAction = action; $('#confirm-dialog').showModal();
+}
+function closeDialog(id) {
+  if (id === 'booking-dialog' && formDirty) { confirm('放弃本次修改？', '尚未保存的预约内容会丢失。', () => { formDirty = false; $('#booking-dialog').close(); }); return; }
+  $('#' + id).close();
+}
+function updateFormTotal() {
+  const f = $('#booking-form').elements;
+  try { $('#form-total').textContent = '¥' + money(toCents(f.fare.value || '0') * Number(f.passengers.value || 0)); } catch { $('#form-total').textContent = '请检查金额'; }
+}
+function applyDirection(defaultFare = true) {
+  const form = $('#booking-form'); const returning = form.elements.direction.value === 'return';
+  form.querySelectorAll('.stop-options label').forEach(label => { label.hidden = returning ? label.querySelector('input').value !== '兴文高铁站' : label.querySelector('input').value === '兴文高铁站'; });
+  const checked = form.querySelector('[name="stop"]:checked');
+  if ((returning && checked?.value !== '兴文高铁站') || (!returning && checked?.value === '兴文高铁站')) form.querySelector(`[name="stop"][value="${returning ? '兴文高铁站' : '马岭'}"]`).checked = true;
+  if (defaultFare) form.elements.fare.value = (data.settings.fares[form.querySelector('[name="stop"]:checked').value] / 100).toFixed(2);
+  form.elements.pickup.placeholder = returning ? '例如：高铁站出站口左侧' : '例如：马岭农贸市场门口';
+  updateFormTotal();
+}
+function openBooking(id) {
+  const form = $('#booking-form'); form.reset();
+  const row = id ? live(data.bookings).find(row => row.id === id) : null;
+  if (id && !row) return toast('这条预约已被删除');
+  editingSnapshot = row ? structuredClone(row) : null;
+  form.elements.id.value = row?.id || '';
+  form.elements.date.value = row?.date || state.date;
+  form.elements.hour.value = row?.hour || state.hour;
+  form.elements.direction.value = row?.direction || state.direction;
+  $('#direction-field').hidden = !data.settings.returnEnabled && row?.direction !== 'return';
+  $('#form-title').textContent = row ? '编辑预约' : '记一笔预约';
+  $('#booking-error').textContent = ''; $('#delete-booking').hidden = !row;
+  if (row) {
+    for (const key of ['pickup', 'phone', 'name', 'passengers', 'status', 'note']) form.elements[key].value = row[key];
+    form.querySelector(`[name="stop"][value="${row.stop}"]`).checked = true;
+    form.elements.fare.value = (row.fare / 100).toFixed(2); form.elements.paid.value = row.paid ? 'yes' : 'no';
+  }
+  applyDirection(!row); formDirty = false; $('#booking-dialog').showModal();
+}
+function openExtra() { const form = $('#extra-form'); form.reset(); form.elements.date.value = state.date; form.elements.hour.value = state.hour; form.elements.direction.value = state.direction; $('#extra-direction-field').hidden = !data.settings.returnEnabled; $('#extra-error').textContent = ''; $('#extra-dialog').showModal(); }
+function download(content, name, type = 'application/json') { const url = URL.createObjectURL(new Blob([content], { type })); const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 15000); }
+function exportBackup() { download(JSON.stringify({ ...currentData(), exportedAt: new Date().toISOString() }, null, 2), `大石专线-全部备份-${localDate()}.json`); toast('备份已导出，请保存下载的文件'); }
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('button'); if (!button) return;
+  if (button.dataset.close) return closeDialog(button.dataset.close);
+  if (button.dataset.page) { state.page = button.dataset.page; state.search = ''; render(); window.scrollTo(0, 0); return; }
+  if (button.dataset.hour) { state.hour = button.dataset.hour; state.search = ''; render(); return; }
+  if (button.dataset.direction) { state.direction = button.dataset.direction; render(); return; }
+  if (button.dataset.filter) { state.filter = button.dataset.filter; render(); return; }
+  if (button.dataset.edit) return openBooking(button.dataset.edit);
+  if (button.dataset.board) { if (updateRecord('bookings', button.dataset.board, { status: 'boarded' })) toast('已标记上车'); return; }
+  if (button.dataset.paid) {
+    const row = live(data.bookings).find(row => row.id === button.dataset.paid); if (!row) return;
+    confirm(row.paid ? '撤销这笔收款？' : `确认已收到 ¥${money(row.fare * row.passengers)}？`, row.paid ? '撤销后，本单会恢复为未收款，并从实收中扣除。' : `${row.name || row.phone} · ${row.passengers} 人。本单将按全额计入 ${row.date} ${row.hour} 班次实收。`, () => { if (updateRecord('bookings', row.id, { paid: !row.paid })) toast(row.paid ? '已撤销收款' : '收款已记入台账'); }); return;
+  }
+  if (button.dataset.viewTrip) { state.hour = button.dataset.viewTrip; state.page = 'bookings'; state.filter = 'all'; state.search = ''; render(); window.scrollTo(0, 0); return; }
+  if (button.dataset.deleteExtra) { const row = data.extras.find(row => row.id === button.dataset.deleteExtra); confirm('删除这笔补记收入？', `¥${money(row.amount)} · ${row.note}。删除后会同步从收入中扣除。`, () => { if (updateRecord('extras', row.id, { deleted: true })) toast('已删除补记收入'); }, true); return; }
+  const action = button.dataset.action;
+  if (action === 'add') openBooking();
+  if (action === 'extra') openExtra();
+  if (action === 'previous-date' || action === 'next-date') { const date = new Date(state.date + 'T12:00:00'); date.setDate(date.getDate() + (action === 'next-date' ? 1 : -1)); const next = localDate(date); if (next >= '2020-01-01' && next <= '2100-12-31') state.date = next; render(); }
+  if (action === 'today') { state.date = localDate(); render(); }
+  if (action === 'csv') { download(incomeCSV(data, state.date), `大石专线-收入-${state.date}.csv`, 'text/csv;charset=utf-8'); toast('当日往返班次收入已导出'); }
+  if (action === 'backup') { try { exportBackup(); } catch(error) { toast(error.message); } }
+  if (action === 'raw-backup') download(localStorage.getItem(STORAGE_KEY) || '', `大石专线-原始记录-${localDate()}.json`);
+  if (action === 'import') $('#import-file').click();
+  if (action === 'sync') runSync(true);
+  if (action === 'disconnect') confirm('断开云端连接？', '当前手机保留全部本地记录，其他司机和云端数据不受影响。未上传的记录请先同步或导出备份。', () => { syncGeneration++; activeSyncController?.abort(); connection = null; localStorage.removeItem(SYNC_KEY); clearTimeout(syncTimer); syncStatus = '未连接云端'; render(); toast('已断开连接，本机记录已保留'); });
+  if (action === 'install') { if (installPrompt) { installPrompt.prompt(); installPrompt = null; } else toast('请在浏览器菜单中选择添加到主屏幕'); }
+});
+$('#confirm-action').addEventListener('click', () => { $('#confirm-dialog').close(); const action = confirmAction; confirmAction = null; action?.(); });
+$('#booking-dialog').addEventListener('cancel', event => { if (formDirty) { event.preventDefault(); closeDialog('booking-dialog'); } });
+document.addEventListener('input', event => {
+  if (event.target.id === 'passenger-search') { state.search = event.target.value; render(); }
+  if (event.target.closest('#booking-form')) { formDirty = true; if (['fare', 'passengers'].includes(event.target.name)) updateFormTotal(); }
+});
+document.addEventListener('change', event => {
+  if (event.target.id === 'selected-date' && event.target.value) { state.date = event.target.value; render(); }
+  if (event.target.closest('#booking-form') && ['stop', 'direction'].includes(event.target.name)) applyDirection(true);
+  if (event.target.id === 'import-file') importFile(event.target.files?.[0]);
+});
+$('#booking-form').addEventListener('submit', event => {
+  event.preventDefault(); const form = event.currentTarget; const f = new FormData(form);
+  try {
+    const id = f.get('id') || crypto.randomUUID();
+    const old = editingSnapshot;
+    const row = { id, date: f.get('date'), hour: f.get('hour'), direction: f.get('direction'), stop: f.get('stop'), pickup: f.get('pickup').trim(), phone: f.get('phone').trim(), name: f.get('name').trim(), passengers: Number(f.get('passengers')), fare: toCents(f.get('fare')), status: f.get('status'), paid: f.get('paid') === 'yes', note: f.get('note').trim(), updatedAt: stamp(old?.updatedAt) };
+    if (!/^[+\d ()-]{5,25}$/.test(row.phone)) throw new Error('请填写有效联系电话（5—25 位，可含区号）');
+    const candidate = freshData(); candidate.bookings.push(row); validateData(candidate);
+    const save = () => {
+      if (change(next => { const index = next.bookings.findIndex(item => item.id === id); if (old && (index < 0 || next.bookings[index].deleted)) throw new Error('预约已被其他设备删除，请重新录入'); if (old && next.bookings[index].updatedAt !== old.updatedAt) throw new Error('这笔预约已被更新，请关闭后重新打开查看'); if (index >= 0) next.bookings[index] = row; else next.bookings.push(row); })) { formDirty = false; $('#booking-dialog').close(); state.date = row.date; state.hour = row.hour; state.direction = row.direction; state.filter = 'all'; state.search = ''; render(); toast('预约已保存'); }
+    };
+    if (row.status === 'cancelled' && row.paid) confirm('取消已收款预约？', '取消后本单不计入实收。请先核实退款，再确认取消。', save); else save();
+  } catch (error) { $('#booking-error').textContent = error.message; }
+});
+$('#delete-booking').addEventListener('click', () => {
+  const id = $('#booking-form').elements.id.value;
+  confirm('删除这笔预约？', '删除后不会计入人数或收入，也会同步到其他已连接的手机。', () => { if (updateRecord('bookings', id, { deleted: true })) { formDirty = false; $('#booking-dialog').close(); toast('预约已删除'); } }, true);
+});
+$('#extra-form').addEventListener('submit', event => {
+  event.preventDefault(); const f = new FormData(event.currentTarget);
+  try { const row = { id: crypto.randomUUID(), date: f.get('date'), hour: f.get('hour'), direction: f.get('direction'), amount: toCents(f.get('amount')), note: f.get('note').trim(), updatedAt: stamp() }; if (!row.note) throw new Error('请填写收入说明'); if (change(next => next.extras.push(row))) { $('#extra-dialog').close(); toast('补记收入已保存'); } }
+  catch (error) { $('#extra-error').textContent = error.message; }
+});
+document.addEventListener('submit', event => {
+  if (event.target.id === 'fares-form') {
+    event.preventDefault(); const f = new FormData(event.target);
+    try { const fares = Object.fromEntries(Object.keys(DEFAULT_SETTINGS.fares).map(stop => [stop, toCents(f.get(stop))])); const returnEnabled = f.get('returnEnabled') === 'on'; if (!returnEnabled) state.direction = 'outbound'; if (change(next => { next.settings = { fares, returnEnabled, updatedAt: stamp(next.settings.updatedAt) }; })) toast('默认票价已保存'); } catch (error) { toast(error.message); }
+  }
+  if (event.target.id === 'sync-form') {
+    event.preventDefault(); const f = new FormData(event.target);
+    try {
+      const config = validateConnection({ repo: f.get('repo').trim(), token: f.get('token').trim() || connection?.token });
+      const connect = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(config)); syncGeneration++; activeSyncController?.abort(); connection = config; syncStatus = '等待同步'; render(); if (syncing) { syncRequested = true; setTimeout(() => runSync(true), 500); } else runSync(true); } catch { toast('无法保存连接，请检查浏览器存储设置'); } };
+      if (connection && connection.repo !== config.repo) confirm('切换数据仓库？', '本机现有记录会合并到新仓库。请确认这是同一条专线的数据。', connect); else connect();
+    } catch (error) { toast(error.message); }
+  }
+});
+async function importFile(file) {
+  if (!file) return;
+  try {
+    if (file.size > 15 * 1024 * 1024) throw new Error('备份文件太大，最多支持 15 MB');
+    const imported = validateData(JSON.parse(await file.text()));
+    confirm('合并这份备份？', `包含 ${live(imported.bookings).length} 笔预约、${live(imported.extras).length} 笔补记收入。相同记录保留较新的修改，已有记录不会被整份覆盖。${connection ? '合并后会同步到云端。' : ''}`, () => { if (change(next => Object.assign(next, mergeData(next, imported)))) toast('备份已合并'); });
+  } catch (error) { toast(error instanceof SyntaxError ? '备份格式错误，请选择本应用导出的 JSON 文件' : error.message); }
+  if ($('#import-file')) $('#import-file').value = '';
+}
+for (const form of ['#booking-form', '#extra-form']) $(form + ' select[name="hour"]').innerHTML = HOURS.map(hour => `<option value="${hour}">${hour} 发车</option>`).join('');
+window.addEventListener('storage', event => { if (event.key === STORAGE_KEY) { try { data = currentData(); render(); } catch { toast('本机数据读取异常，请先备份'); } } });
+window.addEventListener('online', () => { updateBadge(); runSync(); });
+window.addEventListener('offline', updateBadge);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { render(); runSync(); } });
+window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; if (state.page === 'settings') render(); });
+window.addEventListener('beforeunload', event => { if (formDirty) { event.preventDefault(); event.returnValue = ''; } });
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+render();
+if (connection) runSync();
+setInterval(() => { if (document.visibilityState === 'visible' && !$('#booking-dialog').open && !$('#extra-dialog').open) runSync(); }, 45000);

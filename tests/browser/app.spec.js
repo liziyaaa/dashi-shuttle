@@ -1,0 +1,92 @@
+import { test, expect } from '@playwright/test';
+test('phone booking, collect, daily totals, return fare, and persistence', async ({ page }) => {
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: '今天的行程' })).toBeVisible();
+  await page.locator('[data-hour="07:00"]').click();
+  await page.getByRole('button', { name: '新增预约' }).click();
+  const form = page.locator('#booking-form');
+  await expect(form.locator('[name="fare"]')).toHaveValue('40.00');
+  await form.locator('[name="pickup"]').fill('马岭农贸市场门口');
+  await form.locator('[name="phone"]').fill('13800000000');
+  await form.locator('[name="name"]').fill('测试乘客');
+  await form.locator('[name="passengers"]').fill('2');
+  await expect(page.locator('#form-total')).toHaveText('¥80.00');
+  await form.getByRole('button', { name: '保存预约' }).click();
+  await expect(page.locator('.booking-card')).toHaveCount(1);
+  await expect(page.locator('.booking-card a[href="tel:13800000000"]')).toBeVisible();
+  await page.getByRole('button', { name: '收款', exact: true }).click();
+  await page.locator('#confirm-action').click();
+  await expect(page.locator('.income-value')).toContainText('80.00');
+  await page.getByRole('button', { name: '标记上车' }).click();
+  await expect(page.locator('.booking-card .status')).toHaveText('已上车');
+  await page.reload();
+  await page.locator('[data-hour="07:00"]').click();
+  await expect(page.locator('.booking-card')).toHaveCount(1);
+  await page.locator('.bottom-nav [data-page="income"]').click();
+  await page.getByRole('button', { name: '补记收入', exact: true }).click();
+  await page.locator('#extra-form [name="amount"]').fill('20');
+  await page.locator('#extra-form [name="note"]').fill('临时上车 1 人');
+  await page.locator('#extra-form button[type="submit"]').click();
+  await expect(page.locator('.income-value')).toContainText('100.00');
+  await page.locator('.bottom-nav [data-page="bookings"]').click();
+  await page.getByRole('button', { name: '返回大石 ↙' }).click();
+  await page.getByRole('button', { name: '新增预约' }).click();
+  await expect(form.locator('[name="fare"]')).toHaveValue('60.00');
+  await expect(form.locator('[name="stop"][value="兴文高铁站"]')).toBeChecked();
+  await page.locator('[data-close="booking-dialog"]').click();
+  expect(errors).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+});
+test('cancelled bookings excluded, paid reversal and deletion', async ({ page }) => {
+  await page.goto('/'); await page.locator('[data-hour="08:00"]').click();
+  await page.getByRole('button', { name: '新增预约' }).click();
+  await page.locator('#booking-form [name="pickup"]').fill('江门桥头');
+  await page.locator('#booking-form [name="phone"]').fill('13900000000');
+  await page.locator('#booking-form [value="江门"]').check({ force: true });
+  await page.locator('#booking-form [name="paid"]').selectOption('yes');
+  await page.locator('#booking-form button[type="submit"]').click();
+  await expect(page.locator('.income-value')).toContainText('20.00');
+  await page.getByRole('button', { name: '已收款', exact: true }).click(); await page.locator('#confirm-action').click();
+  await expect(page.locator('.income-value')).toContainText('0.00');
+  await page.locator('[data-edit]').click(); await page.locator('#booking-form [name="status"]').selectOption('cancelled'); await page.locator('#booking-form button[type="submit"]').click();
+  await expect(page.locator('.booking-card .status')).toHaveText('已取消');
+  await page.locator('[data-edit]').click(); await page.locator('#delete-booking').click(); await page.locator('#confirm-action').click();
+  await expect(page.locator('.booking-card')).toHaveCount(0);
+});
+test('offline cache, settings backup export and narrow viewport', async ({ page, context }) => {
+  await page.goto('/');
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload();
+  await context.setOffline(true); await page.reload();
+  await expect(page.getByRole('heading', { name: '今天的行程' })).toBeVisible();
+  await page.locator('.bottom-nav [data-page="settings"]').click();
+  await expect(page.locator('#fares-form [name="马岭"]')).toHaveValue('40.00');
+  const downloadPromise = page.waitForEvent('download'); await page.getByRole('button', { name: '导出全部记录（JSON）' }).click();
+  expect((await downloadPromise).suggestedFilename()).toMatch(/\.json$/);
+  await page.setViewportSize({ width: 360, height: 780 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await context.setOffline(false);
+});
+test('two independent phones sync through private GitHub API and offline additions merge', async ({ browser }) => {
+  let cloud = { schema: 1, bookings: [], extras: [], settings: { fares: { 大石: 0, 马岭: 4000, 江门: 2000, 兴文高铁站: 6000 }, returnEnabled: true, updatedAt: '2020-01-01T00:00:00.000Z' } }; let revision = 1;
+  const phones = [];
+  for (let i = 0; i < 2; i++) {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await context.route('https://api.github.com/**', async route => {
+      const req = route.request();
+      if (!req.url().includes('/contents/')) return route.fulfill({ json: { private: true, default_branch: 'main', archived: false } });
+      if (req.method() === 'GET') return route.fulfill({ json: { content: Buffer.from(JSON.stringify(cloud)).toString('base64'), sha: String(revision) } });
+      const body = req.postDataJSON();
+      if (body.sha !== String(revision)) return route.fulfill({ status: 409, json: {} });
+      cloud = JSON.parse(Buffer.from(body.content, 'base64').toString()); revision++; return route.fulfill({ json: {} });
+    });
+    const phone = await context.newPage(); await phone.goto('/'); await phone.locator('.bottom-nav [data-page="settings"]').click(); await phone.locator('#sync-form [name="token"]').fill('github_pat_test'); await phone.locator('#sync-form button[type="submit"]').click(); await expect(phone.locator('.sync-state')).toContainText('已同步'); phones.push({ context, phone });
+  }
+  const first = phones[0].phone; await first.locator('.bottom-nav [data-page="bookings"]').click(); await first.locator('[data-hour="09:00"]').click(); await first.getByRole('button', { name: '新增预约' }).click(); await first.locator('#booking-form [name="pickup"]').fill('测试同步地点'); await first.locator('#booking-form [name="phone"]').fill('13800000001'); await first.locator('#booking-form button[type="submit"]').click();
+  await expect.poll(() => cloud.bookings.length).toBe(1);
+  const second = phones[1].phone; await second.getByRole('button', { name: '立即同步 ↗' }).click(); await expect(second.locator('.sync-state')).toContainText('已同步'); await second.locator('.bottom-nav [data-page="bookings"]').click(); await second.locator('[data-hour="09:00"]').click(); await expect(second.locator('.booking-card')).toHaveCount(1);
+  await phones[1].context.setOffline(true); await second.getByRole('button', { name: '新增预约' }).click(); await second.locator('#booking-form [name="pickup"]').fill('离线录入地点'); await second.locator('#booking-form [name="phone"]').fill('13800000002'); await second.locator('#booking-form button[type="submit"]').click(); await expect(second.locator('.booking-card')).toHaveCount(2); await phones[1].context.setOffline(false); await expect.poll(() => cloud.bookings.length).toBe(2);
+  for (const { context } of phones) await context.close();
+});
+

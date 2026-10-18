@@ -1,0 +1,15 @@
+{
+  "name": "dashi-shuttle",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "大石至兴文高铁站专线预约与收入台账",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
+  }
+}
