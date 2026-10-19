@@ -2,6 +2,7 @@ node_modules/
 test-results/
 playwright-report/
 playwright-report-drivers/
+playwright-report-visual/
 *.log
 .DS_Store
 backups/

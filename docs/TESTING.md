@@ -31,6 +31,9 @@ npm run test:check
 | `npm run test:report` | 打开最近一次 HTML 回归报告 |
 | `npm run test:drivers` | 默认模拟 5 位独立司机，各新增 2 笔预约 |
 | `npm run test:drivers:report` | 打开多司机模拟报告 |
+| `npm run test:drivers:visual` | 录制 Chromium、WebKit 的操作回放及每位司机视频 |
+| `npm run test:drivers:watch` | 显示司机窗口并录制，适合观看自动操作 |
+| `npm run test:visual:report` | 打开带中文阶段、回放及视频的报告 |
 
 不需要提前启动服务：Playwright 会运行 `node scripts/serve.mjs`，在 `http://127.0.0.1:4173/` 测试，结束后关闭自己启动的服务。若本机已有同地址的开发服务器，非 CI 模式会复用；应确认它是本仓库版本，遇到旧页面时先关闭旧服务器。只想预览页面时用 `npm run dev`。
 
@@ -68,6 +71,23 @@ npx playwright test --config=playwright.drivers.config.js --project=webkit
 报告包含 `simulation-summary.json`，统计司机数、最终预约数、模拟 API 请求、读取、写入、SHA 冲突及台账字节数。计时是本机自动化执行时间，**不能换算成 GitHub 真实服务吞吐量**，也不能证明中国大陆网络稳定性。真实额度、限流、长时间容量和 iPhone 真机键盘表现需分别验证。
 
 ## 报告及故障排查
+
+### 怎么可视化查看
+
+`npm run test:visual:report` 打开后，先点击测试名称，再展开「1. 建立独立手机」至「6. 核对所有手机」的中文阶段。
+
+- **Trace / 回放**：点击轨迹缩略图进入时间线，逐项选择点击、填表、保存和网络动作，查看对应页面快照、请求和响应。时间线可以来回检查，不只是看一段视频。
+- **视频**：测试附件包含「司机 1 操作录像」到「司机 5 操作录像」以及「司机 1 联网重开录像」。每位司机单独录制。
+- **请求与结果**：附件包含无密钥的模拟 API 请求明细和 `simulation-summary`，可核对记录数、请求数、冲突及最终一致性。
+- **想看测试现场**：在代码目录运行 `npm run test:drivers:watch`；或用 `npm run test:e2e:ui` 打开交互式界面，选择需要的普通回归场景运行。
+
+普通回归只在失败时保留完整 Trace；要查看通过场景的完整回放，应使用 `test:drivers:visual` 重新录制。这不会覆盖原来的普通回归报告或未录制的多司机报告。
+
+录制报告位于 `playwright-report-visual/`，原始视频与 Trace 位于 `test-results/visual/`。报告是本机产物，`show-report` 给出的 localhost 地址仅能在运行报告服务的这台电脑访问。
+
+30 秒批量时间通过模拟时钟推进，录像不会故意等待 30 秒；应用本身的同步间隔没有为录屏而缩短。所有画面都是自动化运行的真实测试页面，台账数据为虚构数据。
+
+### 输出位置
 
 - 普通 HTML 报告：`playwright-report/index.html`；机器可读结果：`test-results/results.json`。
 - 多司机报告：`playwright-report-drivers/index.html`；运行产物：`test-results/drivers/`。
