@@ -20,7 +20,9 @@
     "test:drivers:report": "playwright show-report playwright-report-drivers",
     "test:drivers:visual": "playwright test --config=playwright.visual.config.js",
     "test:drivers:watch": "playwright test --config=playwright.visual.config.js --headed",
-    "test:visual:report": "playwright show-report playwright-report-visual"
+    "test:visual:report": "playwright show-report playwright-report-visual",
+    "simulator": "node simulator/server.mjs",
+    "test:lab": "playwright test --config=playwright.lab.config.js --project=chromium"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

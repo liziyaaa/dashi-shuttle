@@ -34,6 +34,10 @@ npm run test:check
 | `npm run test:drivers:visual` | 录制 Chromium、WebKit 的操作回放及每位司机视频 |
 | `npm run test:drivers:watch` | 显示司机窗口并录制，适合观看自动操作 |
 | `npm run test:visual:report` | 打开带中文阶段、回放及视频的报告 |
+| `npm run simulator` | 打开可自行改参数、暂停与单步推进的本机仿真实验室 |
+| `npm run test:lab` | 检查实验室控制页面、故障判定和录制产物 |
+
+可视化的参数仿真详见 [仿真实验室使用说明](SIMULATOR.md)。实验室独立使用 9340 端口。
 
 不需要提前启动服务：Playwright 会运行 `node scripts/serve.mjs`，在 `http://127.0.0.1:4173/` 测试，结束后关闭自己启动的服务。若本机已有同地址的开发服务器，非 CI 模式会复用；应确认它是本仓库版本，遇到旧页面时先关闭旧服务器。只想预览页面时用 `npm run dev`。
 

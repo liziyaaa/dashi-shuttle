@@ -2,6 +2,8 @@
 
 适合手机操作的专线车预约及收入管理应用，支持添加到桌面、离线登记和多人同步。
 
+需要自行调整人数、同步频率、预约量和时间速度进行仿真时，运行 `npm run simulator`，打开 <http://127.0.0.1:9340/>。参见 [仿真实验室使用说明](docs/SIMULATOR.md)。
+
 - 应用地址：https://liziyaaa.github.io/dashi-shuttle/
 - 应用代码：https://github.com/liziyaaa/dashi-shuttle
 - 私有数据仓库：https://github.com/liziyaaa/dashi-shuttle-data

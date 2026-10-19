@@ -3,6 +3,8 @@ test-results/
 playwright-report/
 playwright-report-drivers/
 playwright-report-visual/
+playwright-report-lab/
+simulation-results/
 *.log
 .DS_Store
 backups/

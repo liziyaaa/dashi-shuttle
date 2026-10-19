@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>专线仿真实验室</title><link rel="stylesheet" href="/lab.css"></head>
+<body>
+<header><div><span class="eyebrow">兴文高铁站专线</span><h1>仿真实验室 <span class="tag">本机运行</span></h1></div><div class="header-note">真实应用页面 · 独立司机环境 · 模拟数据接口</div></header>
+<div class="layout">
+<aside>
+  <form id="config-form"><fieldset id="parameters">
+  <div class="section-title"><h2>这一轮怎么跑</h2><button type="button" class="text-button" id="reset">重置</button></div>
+  <div class="presets"><button type="button" data-preset="daily">日常使用</button><button type="button" data-preset="busy">多人并发</button><button type="button" data-preset="weak">弱网恢复</button><button type="button" data-preset="quick">快速检查</button></div>
+  <div class="field-grid">
+    <label>司机人数<input name="drivers" type="number" min="1" max="20" required></label>
+    <label>每人新预约条数<input name="bookingsPerDriver" type="number" min="1" max="30" required></label>
+    <label>业务时长（模拟分钟）<input name="durationMinutes" type="number" min="1" max="1440" required></label>
+    <label>时间速度（倍）<input name="speed" type="number" min="1" max="6000" required></label>
+  </div>
+  <label>开始时间（北京时间）<input name="startTime" type="datetime-local" required></label>
+  <div class="field-grid"><label>批量上传间隔（秒）<input name="uploadSeconds" type="number" min="1" max="600" required></label><label>自动刷新间隔（秒）<input name="pollSeconds" type="number" min="5" max="1800" required></label></div>
+  <label>测试引擎<select name="browser"><option value="chromium">Chromium（安卓浏览器参考）</option><option value="webkit">WebKit（Safari 引擎参考）</option></select></label>
+  <p class="help">预计 <b id="planned">9</b> 笔新预约。时间会加速推进；页面点击和请求处理仍需实际时间。</p>
+  <details><summary>司机使用行为</summary><p class="help">按比例安排后续收款、上车、编辑和取消操作，结果会显示实际覆盖次数。</p><div class="field-grid">
+    <label>收款比例 %<input name="paidPercent" type="number" min="0" max="100"></label><label>上车比例 %<input name="boardedPercent" type="number" min="0" max="100"></label>
+    <label>修改备注比例 %<input name="editPercent" type="number" min="0" max="100"></label><label>取消比例 %<input name="cancelPercent" type="number" min="0" max="100"></label>
+    <label>由其他司机编辑 %<input name="crossEditPercent" type="number" min="0" max="100"></label>
+  </div><p class="help">其他司机收到预约后才编辑；若一直收不到，会记录“未覆盖”，不会假定操作成功。</p></details>
+  <details><summary>断网与接口故障</summary><div class="field-grid">
+    <label>断网司机比例 %<input name="offlinePercent" type="number" min="0" max="100"></label><label>断网起点（进度 %）<input name="offlineStartPercent" type="number" min="0" max="90"></label>
+    <label>断网时长（模拟分钟）<input name="offlineMinutes" type="number" min="1" max="1440"></label><label>请求延迟（真实毫秒）<input name="latencyMs" type="number" min="0" max="1000"></label>
+    <label>服务错误概率 %<input name="errorPercent" type="number" min="0" max="50"></label><label>额外 SHA 冲突概率 %<input name="conflictPercent" type="number" min="0" max="50"></label>
+    <label>成功写入后丢响应 %<input name="lostResponsePercent" type="number" min="0" max="30"></label><label>每 N 请求模拟限流<input name="rateLimitEvery" type="number" min="0" max="10000"></label>
+    <label>限流等待（模拟秒）<input name="retryAfterSeconds" type="number" min="1" max="3600"></label>
+  </div><label class="check"><input name="restartOnReconnect" type="checkbox"> 恢复联网时关闭并重开应用，检查本机队列</label><p class="help">0 表示不额外注入故障；多人写入本身仍可能产生真实的 SHA 冲突。</p></details>
+  <details><summary>验证、归档与记录</summary><div class="field-grid">
+    <label>自动收尾观察（分钟）<input name="settleMinutes" type="number" min="1" max="30"></label><label>预置历史预约条数<input name="historyBookings" type="number" min="0" max="200"></label>
+    <label>场景随机种子<input name="seed" type="number" min="1" max="2147483647"></label><label>真实运行上限（分钟）<input name="maxRealMinutes" type="number" min="1" max="30"></label>
+  </div><label class="check"><input name="manualRescue" type="checkbox"> 自动未一致时，再独立检查手动恢复</label><label class="check"><input name="liveFrames" type="checkbox"> 显示前 6 位司机的实时页面快照</label><label class="check"><input name="recordTrace" type="checkbox"> 保存每位司机的 Trace 操作回放</label><label class="check"><input name="recordVideo" type="checkbox"> 保存视频（占用更多磁盘）</label>
+  <p class="help">历史数据会触发真实的月归档代码。相同种子复现相同计划，实际并发顺序可能变化。</p></details>
+  </fieldset><p id="form-error" role="alert"></p><button class="primary full" id="start" type="submit">开始仿真</button></form>
+  <div class="config-actions"><button id="export-config">导出参数</button><button id="import-config">导入参数</button><input type="file" id="config-file" accept="application/json,.json" hidden></div>
+  <p class="footnote">每轮最多 200 笔新预约。所有密钥和乘客均为虚构数据，正式台账不受影响。</p>
+</aside>
+<main>
+  <section class="run-bar"><div><span id="run-status" class="status">等待开始</span><h2 id="phase">设定参数，观察应用如何同步</h2><p id="clock">尚未开始</p></div><div class="run-buttons"><button id="pause" disabled>暂停</button><button id="resume" hidden>继续</button><button id="stop" class="danger" disabled>停止</button></div></section>
+  <div class="progress"><div id="progress-fill"></div></div>
+  <div class="time-controls"><label>运行中速度 <input id="live-speed" type="number" min="1" max="6000" value="600"></label><button id="apply-speed" disabled>调速</button><label>单步分钟 <input id="step-minutes" type="number" min="1" max="60" value="1"></label><button id="step" disabled>推进一步</button><span id="time-help">暂停后可单步推进</span></div>
+  <div class="metrics"><article><span>完成 / 计划新预约</span><strong id="m-created">—</strong></article><article><span>云端记录 / 已知记录</span><strong id="m-records">—</strong></article><article><span>当前待上传</span><strong id="m-pending">—</strong></article><article><span>模拟 API 请求</span><strong id="m-requests">—</strong></article></div>
+  <section class="panel result-panel"><div class="section-title"><h2>问题与一致性检查</h2><a id="download-summary" hidden>下载完整结果 JSON</a></div><div id="checks" class="checks"><p class="empty">会核对预约是否丢失或多出、字段是否被覆盖、各手机是否一致，以及未完成的操作。</p></div><div id="findings"></div><p class="help">自动检查在收尾观察后进行，不强制点击同步。手动恢复结果单列，不能把自动失败改成自动通过。</p></section>
+  <section class="panel"><div class="section-title"><h2>随模拟时间的变化</h2><div class="chart-tabs"><button data-chart="records" class="selected">预约与队列</button><button data-chart="network">请求与冲突</button></div></div><div id="chart" aria-label="仿真时间序列图"></div><div id="chart-legend" class="legend"></div></section>
+  <section class="panel"><div class="section-title"><h2>司机现场</h2><span class="help">来自实际测试页面的快照</span></div><div id="drivers" class="drivers"><p class="empty">开始后，每位司机使用独立的浏览器存储与待上传队列。</p></div></section>
+  <section class="panel"><div class="section-title"><h2>行为与故障记录</h2><select id="log-filter" aria-label="日志筛选"><option value="all">全部记录</option><option value="warning">警告和错误</option><option value="error">仅错误</option></select></div><div id="coverage" class="coverage"></div><div id="logs" class="logs"><p class="empty">暂无记录</p></div></section>
+  <section class="panel"><div class="section-title"><h2>请求明细</h2><span id="network-summary" class="help">仅模拟接口</span></div><div class="table-wrap"><table><thead><tr><th>模拟时间</th><th>司机</th><th>方法</th><th>目标</th><th>结果</th></tr></thead><tbody id="requests"></tbody></table></div></section>
+  <section class="panel"><div class="section-title"><h2>历史运行与回放文件</h2><select id="history" aria-label="历史运行"><option value="">当前运行</option></select></div><div id="files" class="files"></div><p class="help">Trace 用 Playwright Trace Viewer 打开；参数、结果和请求明细可下载留存。重启本机服务后仍可查看已保存的结果。</p></section>
+  <p class="footnote">这是可控条件下的应用行为仿真，不是 GitHub 实际承载能力或 iPhone 真机键盘测试。高倍速下，实际运行速度也受这台电脑和页面操作耗时限制。</p>
+</main></div><div id="toast" role="status"></div><script type="module" src="/lab.js"></script>
+</body></html>
