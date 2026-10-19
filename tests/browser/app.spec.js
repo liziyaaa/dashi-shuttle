@@ -31,7 +31,7 @@ test('phone booking, collect, daily totals, return fare, and persistence', async
   await page.locator('#extra-form button[type="submit"]').click();
   await expect(page.locator('.income-value')).toContainText('100.00');
   await page.locator('.bottom-nav [data-page="bookings"]').click();
-  await page.getByRole('button', { name: '返回大石 ↙' }).click();
+  await page.getByRole('button', { name: '开往大石', exact: true }).click();
   await page.getByRole('button', { name: '新增预约' }).click();
   await expect(form.locator('[name="fare"]')).toHaveValue('60.00');
   await expect(form.locator('[name="stop"][value="兴文高铁站"]')).toBeChecked();

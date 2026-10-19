@@ -136,6 +136,12 @@ GitHub Pages 从 `main` 分支根目录发布；`.nojekyll` 禁用 Jekyll。项�
 - 统计卡片改为低矮矩形，收紧首页区块间距，同时保留人数、金额、日期、筛选和预约操作。
 - 按 393×852 的已连接手机界面加入上下安全区布局检查，确保第一张常规乘客卡片完整位于底部导航上方。
 
+## v1.3.3 班次区与概览卡片
+
+- 将方向切换合并到班次卡片内，简化为「开往高铁 / 开往大石」。
+- 删除始发时间说明、空白预约页提示及页面底部同步说明。
+- 适当放宽首页的区块间距，收入统计概览与预约台账共用卡片尺寸。
+
 ### 后续版本发布
 
 发布时同时更新 `package.json` / `package-lock.json`、`version.json`、`updates.js` 的 `APP_VERSION`、`sw.js` 的 `VERSION`，以及 HTML、manifest 和模块 import URL 的版本号，再运行 `npm test` 检查一致性。`version.json` 不进入离线缓存。

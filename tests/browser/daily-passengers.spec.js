@@ -94,4 +94,11 @@ test('compact phone home removes redundant captions and fits one passenger above
   const nav = await page.locator('.bottom-nav').boundingBox();
   expect(passenger.y + passenger.height).toBeLessThanOrEqual(nav.y);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(page.locator('.schedule-wrap [data-direction]')).toHaveText(['开往高铁', '开往大石']);
+  await expect(page.locator('.schedule-wrap small')).not.toContainText(['时间为始发站发车时间']);
+  await expect(page.locator('.footnote')).toHaveCount(0);
+  await page.locator('.bottom-nav [data-page="income"]').click();
+  const incomeCards = await page.locator('.income-overview').boundingBox();
+  expect(Math.abs(incomeCards.height - cards.height)).toBeLessThan(2);
+  expect(Math.abs(incomeCards.width - cards.width)).toBeLessThan(2);
 });

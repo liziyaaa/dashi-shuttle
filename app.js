@@ -1,9 +1,9 @@
-import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.2';
-import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.2';
-import { sheetGeometry, scrollDelta, displayDate, departurePassed } from './ui.js?v=1.3.2';
-import { APP_VERSION, startUpdates } from './updates.js?v=1.3.2';
+import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.3';
+import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.3';
+import { sheetGeometry, scrollDelta, displayDate, departurePassed } from './ui.js?v=1.3.3';
+import { APP_VERSION, startUpdates } from './updates.js?v=1.3.3';
 
-import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.2';
+import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.3';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -182,9 +182,8 @@ function refreshDateDisplays() {
 }
 function dayName() { const date = new Date(state.date + 'T12:00:00'); const today = state.date === localDate(); return `${date.getMonth() + 1}月${date.getDate()}日 · ${today ? '今天，' : ''}${['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][date.getDay()]}`; }
 function heading(title, subtitle = '') { return `<div class="page-heading"><div><h1>${title}</h1><p class="subtitle">${subtitle || dayName()}</p></div>${dateControls()}</div>`; }
-function directionControls() { return `<div class="segmented" aria-label="行车方向"><button data-direction="outbound" class="${state.direction === 'outbound' ? 'active' : ''}" aria-pressed="${state.direction === 'outbound'}">开往高铁站 ↗</button>${data.settings.returnEnabled ? `<button data-direction="return" class="${state.direction === 'return' ? 'active' : ''}" aria-pressed="${state.direction === 'return'}">返回大石 ↙</button>` : ''}</div>`; }
+function directionControls() { return `<div class="segmented" aria-label="行车方向"><button data-direction="outbound" class="${state.direction === 'outbound' ? 'active' : ''}" aria-pressed="${state.direction === 'outbound'}">开往高铁</button>${data.settings.returnEnabled ? `<button data-direction="return" class="${state.direction === 'return' ? 'active' : ''}" aria-pressed="${state.direction === 'return'}">开往大石</button>` : ''}</div>`; }
 function incomeCard(summary, label = '今日实收', action = true) { return `<section class="income-card" aria-label="${label}"><div class="card-label">${label}</div><div class="income-value"><span class="currency">¥</span>${money(summary.received)}</div><div class="income-foot"><span>待收 ¥${money(summary.unpaid)}</span>${action ? '<button data-page="income">明细 ›</button>' : '<span>含补记收入</span>'}</div></section>`; }
-function footnote() { return `<p class="footnote">${icon(connection ? 'cloud' : 'shield')}${connection ? '联网自动同步 · 无网也能继续登记' : '记录保存在本机 · 在设置中连接多人同步'}</p>`; }
 function bookingsPage() {
   const day = summarize(data, state.date);
   const trip = summarize(data, state.date, state.allDay ? undefined : state.hour, state.direction);
@@ -197,14 +196,13 @@ function bookingsPage() {
   return `${heading(state.date === localDate() ? '今天的行程' : '预约台账')}
   ${!connection ? `<div class="sync-hint"><span>${icon('cloud')} 尚未开启多人同步</span><button class="text-button" data-page="settings">设置 ›</button></div>` : ''}
   <div class="overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收')}<section class="day-card"><div class="day-card-head"><h3>当日预约</h3></div><div class="day-counts"><div><strong>${day.passengers}<small>人</small></strong><p>预约乘客</p></div><div><strong>${day.waiting}<small>人</small></strong><p>等待上车</p></div></div></section></div>
-  <div class="toolbar">${directionControls()}</div>
-  <section class="schedule-wrap"><div class="section-caption"><span>选择发车班次</span><small>时间为始发站发车时间</small></div><div class="hours" aria-label="班次">${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<button class="hour ${!state.allDay && state.hour === hour ? 'active' : ''} ${s.count ? 'has-bookings' : ''}" data-hour="${hour}" aria-pressed="${!state.allDay && state.hour === hour}"><strong>${hour}</strong><small>${s.passengers ? s.passengers + ' 人预约' : '暂无预约'}</small></button>`; }).join('')}</div></section>
+  <section class="schedule-wrap"><div class="section-caption">${directionControls()}<span>选择班次</span></div><div class="hours" aria-label="班次">${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<button class="hour ${!state.allDay && state.hour === hour ? 'active' : ''} ${s.count ? 'has-bookings' : ''}" data-hour="${hour}" aria-pressed="${!state.allDay && state.hour === hour}"><strong>${hour}</strong><small>${s.passengers ? s.passengers + ' 人预约' : '暂无预约'}</small></button>`; }).join('')}</div></section>
   <div class="list-heading"><div class="list-title"><h2>${state.allDay ? (state.date === localDate() ? '今日乘客' : '当日乘客') : state.hour + ' 乘客'}</h2></div><button class="button primary compact" data-action="add">${icon('plus')} 新增预约</button></div>
   <div class="search-bar">${icon('search')}<input id="passenger-search" type="search" placeholder="查找${state.allDay ? '当天' : '本班'}的电话、称呼、上车点" aria-label="查找${state.allDay ? '当天' : '本班'}乘客" value="${esc(state.search)}" autocomplete="off"></div>
   <div class="filter-tabs" aria-label="乘车状态">${[['all','全部'],['booked','待上车'],['boarded','已上车'],['cancelled','已取消']].map(([key,label]) => `<button data-filter="${key}" class="${state.filter === key ? 'active' : ''}" aria-pressed="${state.filter === key}">${label}</button>`).join('')}</div>
   <div class="trip-summary"><span>${state.allDay ? '当天' : '本班'}预约 <b>${trip.passengers}</b> 人 · 待接 <b>${trip.waiting}</b> 人</span><span>实收 <b>¥${money(trip.received)}</b></span></div>
-  <div class="booking-list">${rows.length ? passengerGroups(rows, now) : `<section class="empty-state" style="grid-column:1/-1"><div class="empty-icon">${icon('bus')}</div><h3>${query ? (state.allDay ? '当天没有匹配的乘客' : '本班没有匹配的乘客') : state.filter === 'all' ? (state.allDay ? '当天还没有预约' : '这一班，还没有预约') : '暂无' + ({ booked:'待上车', boarded:'已上车', cancelled:'已取消' }[state.filter]) + '记录'}</h3><p>${query ? '试试其他电话、称呼或上车地点' : '接到乘客电话，随手记下就安心。'}</p>${!query ? `<button class="button secondary" data-action="add">${icon('plus')} 记一笔预约</button>` : ''}</section>`}</div>
-  ${footnote()}`;
+  <div class="booking-list">${rows.length ? passengerGroups(rows, now) : `<section class="empty-state" style="grid-column:1/-1"><div class="empty-icon">${icon('bus')}</div><h3>${query ? (state.allDay ? '当天没有匹配的乘客' : '本班没有匹配的乘客') : state.filter === 'all' ? (state.allDay ? '当天还没有预约' : '这一班，还没有预约') : '暂无' + ({ booked:'待上车', boarded:'已上车', cancelled:'已取消' }[state.filter]) + '记录'}</h3>${query ? '<p>试试其他电话、称呼或上车地点</p>' : ''}${!query ? `<button class="button secondary" data-action="add">${icon('plus')} 记一笔预约</button>` : ''}</section>`}</div>
+  `;
 }
 function passengerGroups(rows, now) {
   const groups = state.allDay ? HOURS.map(hour => ({ hour, rows: rows.filter(row => row.hour === hour) })).filter(group => group.rows.length) : [{ hour: state.hour, rows }];
@@ -223,11 +221,11 @@ function incomePage() {
   const max = Math.max(1, ...HOURS.map(hour => summarize(data, state.date, hour).received));
   const extras = live(data.extras).filter(row => row.date === state.date).sort((a,b) => a.hour.localeCompare(b.hour));
   return `${heading('收入统计')}
-  <div class="income-overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收', false)}<div class="metric-panel"><div class="metric-row"><span>预约应收</span><strong>¥${money(day.expected)}</strong></div><div class="metric-row"><span>预约未收</span><strong>¥${money(day.unpaid)}</strong></div><div class="metric-row"><span>补记实收</span><strong>¥${money(day.extra)}</strong></div></div></div>
+  <div class="overview income-overview">${incomeCard(day, state.date === localDate() ? '今日实收' : '当日实收', false)}<div class="metric-panel"><div class="metric-row"><span>预约应收</span><strong>¥${money(day.expected)}</strong></div><div class="metric-row"><span>预约未收</span><strong>¥${money(day.unpaid)}</strong></div><div class="metric-row"><span>补记实收</span><strong>¥${money(day.extra)}</strong></div></div></div>
   <section class="panel"><div class="list-heading"><h3>一天的收入节奏</h3><span class="muted">往返合计 · 实收</span></div><div class="bar-chart" aria-label="各班次往返实收收入">${HOURS.map(hour => { const sum = summarize(data, state.date, hour); return `<div class="bar-column" title="${hour} 实收 ¥${money(sum.received)}"><div class="bar ${sum.received ? 'has-income' : ''}" style="height:${Math.max(3, sum.received / max * 90)}px"></div><small>${hour.slice(0,2)}时</small></div>`; }).join('')}</div></section>
   <div class="list-heading"><h2>班次账单</h2><div class="header-action"><button class="button secondary" data-action="csv">${icon('download')} 导出</button><button class="button primary" data-action="extra">${icon('plus')} 补记收入</button></div></div><div class="toolbar">${directionControls()}</div>
   <section class="panel" style="margin-top:0;padding-top:6px"><div class="table-scroll"><table class="trip-table"><thead><tr><th>始发班次</th><th>人数</th><th>待收</th><th>补记</th><th>实收（元）</th></tr></thead><tbody>${HOURS.map(hour => { const s = summarize(data, state.date, hour, state.direction); return `<tr><td><button class="text-button" data-view-trip="${hour}">${hour}</button></td><td>${s.passengers}</td><td>${money(s.unpaid)}</td><td>${money(s.extra)}</td><td class="money-cell">${money(s.received)}</td></tr>`; }).join('')}</tbody><tfoot><tr><td>本方向合计</td><td>${dir.passengers}</td><td>${money(dir.unpaid)}</td><td>${money(dir.extra)}</td><td class="money-cell">${money(dir.received)}</td></tr></tfoot></table></div></section>
-  ${extras.length ? `<section class="panel"><h3>当日补记明细</h3>${extras.map(row => `<div class="extras-row"><div>${esc(row.note)}<small>${row.hour} · ${row.direction === 'return' ? '返回大石' : '开往高铁站'}</small></div><div><b>¥${money(row.amount)}</b><button class="icon-button edit-button" data-delete-extra="${esc(row.id)}" aria-label="删除补记收入 ${esc(row.note)}">${icon('trash')}</button></div></div>`).join('')}</section>` : ''}${footnote()}`;
+  ${extras.length ? `<section class="panel"><h3>当日补记明细</h3>${extras.map(row => `<div class="extras-row"><div>${esc(row.note)}<small>${row.hour} · ${row.direction === 'return' ? '返回大石' : '开往高铁站'}</small></div><div><b>¥${money(row.amount)}</b><button class="icon-button edit-button" data-delete-extra="${esc(row.id)}" aria-label="删除补记收入 ${esc(row.note)}">${icon('trash')}</button></div></div>`).join('')}</section>` : ''}`;
 }
 function settingsPage() {
   return `<div class="page-heading"><div><h1>设置</h1></div></div>

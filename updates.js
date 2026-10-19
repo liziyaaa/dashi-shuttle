@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.3.2';
+export const APP_VERSION = '1.3.3';
 export function newerVersion(candidate, current = APP_VERSION) {
   if (!/^\d+\.\d+\.\d+$/.test(candidate)) return false;
   const a = candidate.split('.').map(Number), b = current.split('.').map(Number);
