@@ -7,7 +7,17 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "test": "node --test tests/*.test.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:setup": "playwright install chromium webkit",
+    "test:check": "node scripts/check-test-env.mjs",
+    "test:all": "npm run test:check && npm test && npm run test:e2e",
+    "test:e2e:chromium": "playwright test --project=chromium",
+    "test:e2e:webkit": "playwright test --project=webkit",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed --workers=1",
+    "test:report": "playwright show-report",
+    "test:drivers": "playwright test --config=playwright.drivers.config.js --project=chromium",
+    "test:drivers:report": "playwright show-report playwright-report-drivers"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseDate } from '../helpers/date-picker.js';
 const empty = () => ({ schema: 1, bookings: [], extras: [], settings: { fares: { 大石: 0, 马岭: 4000, 江门: 2000, 兴文高铁站: 6000 }, returnEnabled: true, updatedAt: '2020-01-01T00:00:00.000Z' } });
 const row = (id, date) => ({ id, date, hour: '07:00', direction: 'outbound', stop: '马岭', pickup: '历史测试点', phone: '13800000000', name: '历史乘客', passengers: 1, fare: 4000, paid: true, status: 'booked', note: '', updatedAt: '2026-10-18T00:00:00.000Z' });
 async function api(context, initial = empty()) {
@@ -96,7 +97,7 @@ test('new phone reads a historical month only when selected and preserves income
     service.calls.length = 0; await page.reload();
     await expect(page.locator('#sync-summary')).toContainText('已同步');
     expect(service.calls.filter(c => c.path.startsWith('archives/'))).toHaveLength(0);
-    await page.locator('#selected-date').fill('2026-08-20'); await page.locator('[data-hour="07:00"]').click();
+    await chooseDate(page, '2026-08-20'); await page.locator('[data-hour="07:00"]').click();
     await expect(page.locator('.booking-card')).toHaveCount(1);
     await expect(page.locator('.income-value')).toContainText('40.00');
     expect(service.calls.filter(c => c.path === 'archives/2026-08.json' && c.method === 'GET')).toHaveLength(1);
@@ -126,7 +127,7 @@ test('missing historical file shows a persistent error without an automatic requ
   try {
     const initial = { ...empty(), schema: 2, protocol: 2, cutoff: '2026-10-04', archives: { '2026-08': ['2026-08'] }, legacyHomes: {} };
     const service = await api(context, initial); const page = await context.newPage(); await connect(page);
-    await page.locator('#selected-date').fill('2026-08-20');
+    await chooseDate(page, '2026-08-20');
     await expect(page.locator('#history-status')).toContainText('历史加载未完成');
     await page.clock.runFor(1000);
     expect(service.calls.filter(c => c.path.startsWith('archives/'))).toHaveLength(1);

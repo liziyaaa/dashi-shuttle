@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseDate } from '../helpers/date-picker.js';
 test('phone booking, collect, daily totals, return fare, and persistence', async ({ page }, testInfo) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
@@ -157,7 +158,7 @@ test('note focus survives a visual-only keyboard resize and iOS viewport panning
 
 test('home date display has one line, navigates across years and opens booking on selected day', async ({ page }) => {
   await page.goto('/');
-  await page.locator('#selected-date').fill('2026-12-31');
+  await chooseDate(page, '2026-12-31');
   await page.getByRole('button', { name: '后一天', exact: true }).click();
   await expect(page.locator('#selected-date')).toHaveValue('2027-01-01');
   await expect(page.locator('.home-date .date-display')).toHaveText('2027/01/01');
@@ -189,6 +190,8 @@ test('bottom navigation stays at viewport bottom while only page content scrolls
   }
 });
 
+test.describe('mocked connection API', () => {
+test.use({ serviceWorkers: 'block' });
 test('key-only connection errors stay visible and a replacement key reconnects without exposing credentials', async ({ page, context }) => {
   await context.route('https://api.github.com/**', async route => {
     const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GitHub-Api-Version, Accept, Cache-Control, Pragma' };
@@ -209,4 +212,5 @@ test('key-only connection errors stay visible and a replacement key reconnects w
   await expect(page.locator('.sync-state')).toContainText('已同步');
   await expect(page.locator('#sync-error')).toBeHidden();
   expect(await page.locator('#app').innerHTML()).not.toContain('github_pat_valid');
+});
 });

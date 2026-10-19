@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { chooseDate } from '../helpers/date-picker.js';
 test.use({ timezoneId: 'Asia/Shanghai' });
 const row = (id, hour, stop = '马岭', patch = {}) => ({ id, date: '2026-10-18', hour, direction: 'outbound', stop, pickup: `${stop}测试点`, phone: '13800000000', name: id, passengers: 1, fare: 2000, paid: false, status: 'booked', note: '', updatedAt: '2026-10-18T00:00:00.000Z', ...patch });
 async function setup(page, time = '2026-10-18T07:30:00Z') {
@@ -34,7 +35,7 @@ test('hour click filters, second click returns to today, and all-day rows keep c
 });
 test('deselecting a trip on a different date resets to the phone local today', async ({ page }) => {
   await setup(page);
-  await page.locator('#selected-date').fill('2026-10-19');
+  await chooseDate(page, '2026-10-19');
   await page.locator('[data-hour="17:00"]').click();
   expect(await ids(page)).toEqual(['tomorrow']);
   await page.locator('[data-hour="17:00"]').click();
@@ -55,7 +56,7 @@ test('today all-day view follows local midnight while browsing a historical date
   await page.clock.runFor(61000);
   await expect(page.locator('#selected-date')).toHaveValue('2026-10-19');
   expect(await ids(page)).toEqual(['tomorrow']);
-  await page.locator('#selected-date').fill('2026-10-17'); await page.locator('.brand').focus();
+  await chooseDate(page, '2026-10-17'); await page.locator('.brand').focus();
   await page.clock.runFor(61000);
   await expect(page.locator('#selected-date')).toHaveValue('2026-10-17');
 });

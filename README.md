@@ -72,6 +72,8 @@ GitHub Pages 托管公开的程序，乘客电话和收入只存于手机本地�
 
 ## 本地运行与验证
 
+完整环境搭建、多司机模拟、报告及故障排查见 [测试环境说明](docs/TESTING.md)。
+
 ```sh
 npm install
 npx playwright install chromium webkit
