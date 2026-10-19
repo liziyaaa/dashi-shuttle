@@ -32,7 +32,16 @@ export class Simulation {
     if (this.logs.length > 300) this.logs.shift();
   }
   snapshot() {
+    const localRows = new Map();
+    for (const phone of this.phones) for (const row of phone.rows) { const copies = localRows.get(row.id) || []; copies.push(row); localRows.set(row.id, copies); }
+    const missingLocal = [], mismatchedLocal = [];
+    for (const [id, expected] of this.expected) if (!id.startsWith('history-')) {
+      const copies = localRows.get(id) || [];
+      if (!copies.length) missingLocal.push(id);
+      else if (!copies.some(row => fields.every(field => row[field] === expected[field]))) mismatchedLocal.push(expected.name);
+    }
     return { ...this.state, paused: this.paused, speed: this.speed, virtualTime: shanghaiTime(this.now()), elapsedMinutes: this.elapsed / 60000,
+      localIntegrity: { passed: !missingLocal.length && !mismatchedLocal.length, missingIds: missingLocal, mismatchedNames: mismatchedLocal },
       coverage: { ...this.coverage }, metrics: this.service.metrics(), plannedBookings: this.config.drivers * this.config.bookingsPerDriver,
       expectedRecords: this.expected.size, expectedReceipt: receipt([...this.expected.values()]), cloudReceipt: receipt(this.service.allRecords()),
       drivers: this.phones.map(phone => ({ id: phone.id, offline: phone.offline, ...phone.view, frame: this.frames.get(phone.id)?.sequence || 0 })),
@@ -292,6 +301,7 @@ export class Simulation {
       else agreed++;
     }
     if (this.coverage.created !== this.config.drivers * this.config.bookingsPerDriver) issues.push({ severity: 'error', message: `计划 ${this.config.drivers * this.config.bookingsPerDriver} 笔，实际只录入 ${this.coverage.created} 笔` });
+    if (this.service.metrics().earlyRetries) issues.push({ severity: 'error', message: `收到限流后提前请求 ${this.service.metrics().earlyRetries} 次，未遵守服务等待时间` });
     return { passed: issues.length === 0, agreedDrivers: agreed, drivers: this.phones.length, issues: issues.slice(0, 100), checkedAt: shanghaiTime(this.now()), cloudRecords: rows.length, pending: this.phones.reduce((sum, phone) => sum + phone.view.pending, 0) };
   }
   async run() {

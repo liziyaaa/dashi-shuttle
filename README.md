@@ -146,6 +146,12 @@ GitHub Pages 从 `main` 分支根目录发布；`.nojekyll` 禁用 Jekyll。项�
 - 删除始发时间说明、空白预约页提示及页面底部同步说明。
 - 适当放宽首页的区块间距，收入统计概览与预约台账共用卡片尺寸。
 
+## v1.3.4 限流恢复与压力测试
+
+- 修复二级限流时误等待到小时额度重置的问题；小时额度未耗尽时遵守 Retry-After，确实耗尽时仍等待重置。
+- 本机仿真实验室增加共享账号额度、其他项目背景占用和冷却检查。运行 `npm run test:stress` 可执行八场景矩阵，`http://127.0.0.1:9340/stress` 查看汇总。
+- [2026-10-19 压力测试记录](docs/STRESS-2026-10-19.md) 分别记录修复前后和仍存在的跨司机整条记录覆盖风险。
+
 ### 后续版本发布
 
 发布时同时更新 `package.json` / `package-lock.json`、`version.json`、`updates.js` 的 `APP_VERSION`、`sw.js` 的 `VERSION`，以及 HTML、manifest 和模块 import URL 的版本号，再运行 `npm test` 检查一致性。`version.json` 不进入离线缓存。

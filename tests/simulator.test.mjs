@@ -76,3 +76,20 @@ test('local controller serves the panel and rejects cross-origin or invalid runs
     await rm(output, { recursive: true, force: true });
   }
 });
+
+test('concurrent start requests cannot run two jobs against the shared app server', async t => {
+  let release;
+  t.mock.method(Simulation.prototype, 'run', function () { return new Promise(resolve => { release = () => { this.state.finishedAt = new Date().toISOString(); resolve(); }; }); });
+  const output = await mkdtemp(join(tmpdir(), 'shuttle-lab-test-'));
+  const lab = await createLabServer({ port: 0, output });
+  try {
+    const { token } = await (await fetch(lab.origin + '/api/state')).json();
+    const launch = () => fetch(lab.origin + '/api/start', { method: 'POST', headers: { Origin: lab.origin, 'X-Lab-Token': token }, body: '{}' });
+    const responses = await Promise.all([launch(), launch()]);
+    assert.deepEqual(responses.map(response => response.status).sort(), [202, 409]);
+  } finally {
+    release?.(); await lab.close();
+    assert.equal(dirname(resolve(output)), resolve(tmpdir())); assert.ok(basename(output).startsWith('shuttle-lab-test-'));
+    await rm(output, { recursive: true, force: true });
+  }
+});

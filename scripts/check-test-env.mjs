@@ -26,10 +26,12 @@ if (runtime) {
     }
   }
 }
-try {
-  execFileSync('git', ['cat-file', '-e', '9b26f14:index.html'], { cwd: root, stdio: 'pipe' });
-  console.log('OK 升级测试所需的 v1.2.0 Git 历史');
-} catch { problems.push('升级测试需要完整 Git 历史，请运行 git fetch --unshallow（浅克隆时）或 git fetch origin'); }
+for (const [ref, version] of [['9b26f14', '1.2.0'], ['4370b6a', '1.3.3']]) {
+  try {
+    execFileSync('git', ['cat-file', '-e', `${ref}:index.html`], { cwd: root, stdio: 'pipe' });
+    console.log(`OK 升级测试所需的 v${version} Git 历史`);
+  } catch { problems.push(`v${version} 升级测试需要完整 Git 历史，请运行 git fetch --unshallow（浅克隆时）或 git fetch origin`); }
+}
 for (const path of ['playwright.config.js', 'scripts/serve.mjs', 'tests/browser/upgrade.spec.js']) {
   if (!existsSync(resolve(root, path))) problems.push(`缺少项目文件：${path}`);
 }

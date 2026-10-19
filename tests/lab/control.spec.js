@@ -1,5 +1,45 @@
 import { test, expect } from '@playwright/test';
 
+async function startRun(page) {
+  const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/start' && response.request().method() === 'POST');
+  await page.getByRole('button', { name: '开始仿真', exact: true }).click();
+  const { id } = await (await created).json();
+  await expect(page.locator('#drivers')).toHaveAttribute('data-signature', new RegExp('^' + id + ':'));
+  return id;
+}
+
+test('secondary write limit resumes after Retry-After while primary budget remains', async ({ page }) => {
+  await page.goto('/'); await page.waitForFunction(() => document.querySelector('[name="drivers"]').value !== '');
+  const form = page.locator('#config-form');
+  for (const summary of await form.locator('details > summary').all()) await summary.click();
+  for (const [name, value] of Object.entries({ drivers: 1, bookingsPerDriver: 1, durationMinutes: 1, speed: 6000, offlinePercent: 0, paidPercent: 0, boardedPercent: 0, editPercent: 0, cancelPercent: 0, settleMinutes: 3, latencyMs: 0, contentPerMinute: 1, uploadSeconds: 1, pollSeconds: 5 })) await form.locator(`[name="${name}"]`).fill(String(value));
+  await form.locator('[name="recordTrace"]').uncheck(); await form.locator('[name="recordVideo"]').uncheck();
+  await startRun(page);
+  await expect(page.locator('#run-status')).toHaveText('自动检查通过', { timeout: 90000 });
+  const result = (await (await page.request.get('/api/state')).json()).selected;
+  expect(result.application.version).toBe('1.3.4');
+  expect(result.metrics.quota.secondaryLimitHits).toBeGreaterThan(0);
+  expect(result.metrics.quota.remaining).toBeGreaterThan(0);
+  expect(result.metrics.earlyRetries).toBe(0); expect(result.automaticCheck.passed).toBe(true);
+});
+
+test('shared GitHub account quota blocks, waits until reset and automatically recovers', async ({ page }) => {
+  await page.goto('/'); await page.waitForFunction(() => document.querySelector('[name="drivers"]').value !== '');
+  const form = page.locator('#config-form');
+  for (const summary of await form.locator('details > summary').all()) await summary.click();
+  for (const [name, value] of Object.entries({ drivers: 1, bookingsPerDriver: 1, durationMinutes: 3, speed: 6000, offlinePercent: 0, paidPercent: 100, boardedPercent: 100, editPercent: 100, cancelPercent: 0, settleMinutes: 3, latencyMs: 0, primaryUsed: 4999, primaryResetSeconds: 120 })) await form.locator(`[name="${name}"]`).fill(String(value));
+  await form.locator('[name="recordTrace"]').uncheck(); await form.locator('[name="recordVideo"]').uncheck();
+  await startRun(page);
+  await expect(page.locator('#run-status')).toHaveText('自动检查通过', { timeout: 90000 });
+  await expect(page.locator('#start')).toBeEnabled();
+  const result = (await (await page.request.get('/api/state')).json()).selected;
+  expect(result.metrics.quota.primaryLimitHits).toBeGreaterThan(0);
+  expect(result.metrics.earlyRetries).toBe(0); expect(result.localIntegrity.passed).toBe(true);
+  await page.goto('/?run=' + result.id);
+  await expect(page.locator('#quota-summary')).toContainText('共享账号');
+  await page.locator('#load-params').click(); await expect(form.locator('[name="primaryUsed"]')).toHaveValue('4999');
+});
+
 test('WebKit preserves archived history and exports real traces and video', async ({ page }) => {
   await page.goto('/'); await page.waitForFunction(() => document.querySelector('[name="drivers"]').value !== '');
   const form = page.locator('#config-form');
@@ -7,7 +47,7 @@ test('WebKit preserves archived history and exports real traces and video', asyn
   for (const [name, value] of Object.entries({ drivers: 1, bookingsPerDriver: 1, durationMinutes: 2, speed: 6000, offlinePercent: 0, paidPercent: 100, boardedPercent: 100, editPercent: 100, cancelPercent: 0, settleMinutes: 3, latencyMs: 0, historyBookings: 3, uploadSeconds: 7, pollSeconds: 15 })) await form.locator(`[name="${name}"]`).fill(String(value));
   await form.locator('[name="browser"]').selectOption('webkit');
   await form.locator('[name="recordTrace"]').check(); await form.locator('[name="recordVideo"]').check();
-  await page.getByRole('button', { name: '开始仿真', exact: true }).click();
+  await startRun(page);
   await expect(page.locator('#run-status')).toHaveText('自动检查通过', { timeout: 120000 });
   await expect(page.locator('#start')).toBeEnabled({ timeout: 30000 });
   const result = (await (await page.request.get('/api/state')).json()).selected;
@@ -33,7 +73,7 @@ test('control page runs real drivers, pauses, steps time and exports independent
   for (const [name, value] of Object.entries({ drivers: 2, bookingsPerDriver: 1, durationMinutes: 6, speed: 6000, offlinePercent: 50, offlineStartPercent: 20, offlineMinutes: 3, paidPercent: 100, boardedPercent: 100, editPercent: 100, cancelPercent: 0, settleMinutes: 2, latencyMs: 0 })) await form.locator(`[name="${name}"]`).fill(String(value));
   await form.locator('[name="recordTrace"]').uncheck();
   await form.locator('[name="recordVideo"]').uncheck();
-  await page.getByRole('button', { name: '开始仿真', exact: true }).click();
+  await startRun(page);
   await expect(page.locator('#pause')).toBeEnabled(); await page.locator('#pause').click();
   await expect(page.locator('#run-status')).toHaveText('已暂停');
   await page.locator('#step').click();
@@ -62,7 +102,7 @@ test('fault conditions remain visible after automatic and manual checks; stop is
   for (const summary of await form.locator('details > summary').all()) await summary.click();
   for (const [name, value] of Object.entries({ drivers: 1, bookingsPerDriver: 1, durationMinutes: 2, speed: 6000, offlinePercent: 0, paidPercent: 0, boardedPercent: 0, editPercent: 0, cancelPercent: 0, settleMinutes: 1, latencyMs: 0, rateLimitEvery: 1, retryAfterSeconds: 60 })) await form.locator(`[name="${name}"]`).fill(String(value));
   await form.locator('[name="recordTrace"]').uncheck(); await form.locator('[name="recordVideo"]').uncheck(); await form.locator('[name="liveFrames"]').uncheck();
-  await page.getByRole('button', { name: '开始仿真', exact: true }).click();
+  await startRun(page);
   await expect(page.locator('#run-status')).toHaveText('发现问题', { timeout: 90000 });
   await expect(page.locator('#checks')).toContainText('自动检查：发现差异');
   const result = (await (await page.request.get('/api/state')).json()).selected;
@@ -74,7 +114,7 @@ test('fault conditions remain visible after automatic and manual checks; stop is
   await expect(page.locator('#start')).toBeEnabled();
   await form.locator('[name="rateLimitEvery"]').fill('0');
   await form.locator('[name="durationMinutes"]').fill('120'); await form.locator('[name="speed"]').fill('1');
-  await page.getByRole('button', { name: '开始仿真', exact: true }).click();
+  await startRun(page);
   await expect(page.locator('#stop')).toBeEnabled(); await page.locator('#stop').click();
   await expect(page.locator('#run-status')).toHaveText('已停止', { timeout: 30000 });
   await expect(page.locator('#findings')).toContainText('不能作为完整通过结果');

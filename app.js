@@ -1,9 +1,9 @@
-import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.3';
-import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.3';
-import { sheetGeometry, scrollDelta, displayDate, departurePassed } from './ui.js?v=1.3.3';
-import { APP_VERSION, startUpdates } from './updates.js?v=1.3.3';
+import { HOURS, STORAGE_KEY, SYNC_KEY, DEFAULT_SETTINGS, freshData, localDate, money, toCents, nextHour, validateData, mergeData, live, summarize, incomeCSV } from './core.js?v=1.3.4';
+import { createSyncClient, validateConnection, DATA_REPO, UPLOAD_DELAY, PULL_INTERVAL, hasPending, reconcileActive } from './sync.js?v=1.3.4';
+import { sheetGeometry, scrollDelta, displayDate, departurePassed } from './ui.js?v=1.3.4';
+import { APP_VERSION, startUpdates } from './updates.js?v=1.3.4';
 
-import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.3';
+import { emptyPending, allPending, markPending, acknowledgePending, createUploadScheduler } from './scheduler.js?v=1.3.4';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

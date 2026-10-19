@@ -12,7 +12,7 @@ npm run test:setup
 npm run test:check
 ```
 
-`npm ci` 根据 lockfile 安装固定依赖；`test:setup` 从 Playwright 官方源下载 Chromium 和 WebKit。环境检查会核对 Node、浏览器文件及升级测试所需的 v1.2.0 Git 提交。测试浏览器独立于日常 Chrome，默认不使用个人浏览器资料或登录状态。
+`npm ci` 根据 lockfile 安装固定依赖；`test:setup` 从 Playwright 官方源下载 Chromium 和 WebKit。环境检查会核对 Node、浏览器文件及升级测试所需的 v1.2.0、v1.3.3 Git 提交。测试浏览器独立于日常 Chrome，默认不使用个人浏览器资料或登录状态。
 
 浅克隆需要先运行 `git fetch --unshallow`，否则升级测试无法读取旧版文件。在 Linux CI 中还需运行 `npx playwright install --with-deps chromium webkit` 安装系统库。
 
@@ -36,6 +36,7 @@ npm run test:check
 | `npm run test:visual:report` | 打开带中文阶段、回放及视频的报告 |
 | `npm run simulator` | 打开可自行改参数、暂停与单步推进的本机仿真实验室 |
 | `npm run test:lab` | 检查实验室控制页面、故障判定和录制产物 |
+| `npm run test:stress` | 在已启动的实验室中依次执行八个压力场景 |
 
 可视化的参数仿真详见 [仿真实验室使用说明](SIMULATOR.md)。实验室独立使用 9340 端口。
 

@@ -29,6 +29,12 @@
     <label>成功写入后丢响应 %<input name="lostResponsePercent" type="number" min="0" max="30"></label><label>每 N 请求模拟限流<input name="rateLimitEvery" type="number" min="0" max="10000"></label>
     <label>限流等待（模拟秒）<input name="retryAfterSeconds" type="number" min="1" max="3600"></label>
   </div><label class="check"><input name="restartOnReconnect" type="checkbox"> 恢复联网时关闭并重开应用，检查本机队列</label><p class="help">0 表示不额外注入故障；多人写入本身仍可能产生真实的 SHA 冲突。</p></details>
+  <details><summary>GitHub 共享账号额度模型</summary><label class="check"><input name="githubLimits" type="checkbox"> 启用公开规则的近似模型（所有司机共享）</label><div class="field-grid">
+    <label>账号小时请求额度<input name="primaryLimit" type="number" min="1" max="50000"></label><label>开始时已用请求数<input name="primaryUsed" type="number" min="0" max="50000"></label>
+    <label>距首次重置（秒）<input name="primaryResetSeconds" type="number" min="1" max="3600"></label><label>每分钟写入尝试上限<input name="contentPerMinute" type="number" min="1" max="1000"></label>
+    <label>每小时写入尝试上限<input name="contentPerHour" type="number" min="1" max="10000"></label><label>其他项目请求 / 小时<input name="otherRequestsPerHour" type="number" min="0" max="50000"></label>
+    <label>其中写入 / 小时<input name="otherWritesPerHour" type="number" min="0" max="10000"></label>
+  </div><p class="help">默认 5000 请求/小时、80 写入/分钟、500 写入/小时；模型保守计入冲突尝试。另检查 900 端点积分/分钟、100 并发。其他项目按均匀背景流量近似。GitHub 未公开的风控无法完全仿真，修改模型阈值不会改变真实配额。</p></details>
   <details><summary>验证、归档与记录</summary><div class="field-grid">
     <label>自动收尾观察（分钟）<input name="settleMinutes" type="number" min="1" max="30"></label><label>预置历史预约条数<input name="historyBookings" type="number" min="0" max="200"></label>
     <label>场景随机种子<input name="seed" type="number" min="1" max="2147483647"></label><label>真实运行上限（分钟）<input name="maxRealMinutes" type="number" min="1" max="30"></label>
@@ -43,12 +49,12 @@
   <div class="progress"><div id="progress-fill"></div></div>
   <div class="time-controls"><label>运行中速度 <input id="live-speed" type="number" min="1" max="6000" value="600"></label><button id="apply-speed" disabled>调速</button><label>单步分钟 <input id="step-minutes" type="number" min="1" max="60" value="1"></label><button id="step" disabled>推进一步</button><span id="time-help">暂停后可单步推进</span></div>
   <div class="metrics"><article><span>完成 / 计划新预约</span><strong id="m-created">—</strong></article><article><span>云端记录 / 已知记录</span><strong id="m-records">—</strong></article><article><span>当前待上传</span><strong id="m-pending">—</strong></article><article><span>模拟 API 请求</span><strong id="m-requests">—</strong></article></div>
-  <section class="panel result-panel"><div class="section-title"><h2>问题与一致性检查</h2><a id="download-summary" hidden>下载完整结果 JSON</a></div><div id="checks" class="checks"><p class="empty">会核对预约是否丢失或多出、字段是否被覆盖、各手机是否一致，以及未完成的操作。</p></div><div id="findings"></div><p class="help">自动检查在收尾观察后进行，不强制点击同步。手动恢复结果单列，不能把自动失败改成自动通过。</p></section>
+  <section class="panel result-panel"><div class="section-title"><h2>问题与一致性检查</h2><a id="download-summary" hidden>下载完整结果 JSON</a></div><div id="checks" class="checks"><p class="empty">会核对预约是否丢失或多出、字段是否被覆盖、各手机是否一致，以及未完成的操作。</p></div><p id="quota-summary" class="help"></p><div id="findings"></div><p class="help">自动检查在收尾观察后进行，不强制点击同步。手动恢复结果单列，不能把自动失败改成自动通过。</p></section>
   <section class="panel"><div class="section-title"><h2>随模拟时间的变化</h2><div class="chart-tabs"><button data-chart="records" class="selected">预约与队列</button><button data-chart="network">请求与冲突</button></div></div><div id="chart" aria-label="仿真时间序列图"></div><div id="chart-legend" class="legend"></div></section>
   <section class="panel"><div class="section-title"><h2>司机现场</h2><span class="help">来自实际测试页面的快照</span></div><div id="drivers" class="drivers"><p class="empty">开始后，每位司机使用独立的浏览器存储与待上传队列。</p></div></section>
   <section class="panel"><div class="section-title"><h2>行为与故障记录</h2><select id="log-filter" aria-label="日志筛选"><option value="all">全部记录</option><option value="warning">警告和错误</option><option value="error">仅错误</option></select></div><div id="coverage" class="coverage"></div><div id="logs" class="logs"><p class="empty">暂无记录</p></div></section>
   <section class="panel"><div class="section-title"><h2>请求明细</h2><span id="network-summary" class="help">仅模拟接口</span></div><div class="table-wrap"><table><thead><tr><th>模拟时间</th><th>司机</th><th>方法</th><th>目标</th><th>结果</th></tr></thead><tbody id="requests"></tbody></table></div></section>
-  <section class="panel"><div class="section-title"><h2>历史运行与回放文件</h2><select id="history" aria-label="历史运行"><option value="">当前运行</option></select></div><div id="files" class="files"></div><p class="help">Trace 用 Playwright Trace Viewer 打开；参数、结果和请求明细可下载留存。重启本机服务后仍可查看已保存的结果。</p></section>
+  <section class="panel"><div class="section-title"><h2>历史运行与回放文件</h2><select id="history" aria-label="历史运行"><option value="">当前运行</option></select></div><button id="load-params" disabled>载入这轮参数</button><div id="files" class="files"></div><p class="help">Trace 用 Playwright Trace Viewer 打开；参数、结果和请求明细可下载留存。重启本机服务后仍可查看已保存的结果。</p></section>
   <p class="footnote">这是可控条件下的应用行为仿真，不是 GitHub 实际承载能力或 iPhone 真机键盘测试。高倍速下，实际运行速度也受这台电脑和页面操作耗时限制。</p>
 </main></div><div id="toast" role="status"></div><script type="module" src="/lab.js"></script>
 </body></html>

@@ -1,8 +1,10 @@
 import { freshData } from '../core.js';
 import { randomGenerator, shanghaiDate } from './config.mjs';
+import { createQuotaModel } from './quotas.mjs';
 
 export function createService(config, now, log = () => {}) {
   const random = randomGenerator(config.seed + 991);
+  const quotas = createQuotaModel(config, now);
   const initial = freshData();
   for (let i = 0; i < config.historyBookings; i++) {
     const date = shanghaiDate(Date.parse(config.startTime + ':00+08:00') - (45 - i % 20) * 86400000);
@@ -10,9 +12,9 @@ export function createService(config, now, log = () => {}) {
   }
   const expectedHistory = structuredClone(initial.bookings);
   const files = new Map([['ledger.json', { sha: '1', data: initial }]]);
-  const calls = [], cooldowns = new Map(), driverRequests = new Map();
+  const calls = [], cooldowns = new Map(), driverRequests = new Map(), observedCooldowns = new Map();
   let revision = 1, active = 0;
-  const counters = { requests: 0, reads: 0, writes: 0, savedWrites: 0, conflicts: 0, serverErrors: 0, rateLimits: 0, lostResponses: 0, blockedExternal: 0 };
+  const counters = { requests: 0, reads: 0, writes: 0, savedWrites: 0, conflicts: 0, serverErrors: 0, rateLimits: 0, earlyRetries: 0, lostResponses: 0, blockedExternal: 0 };
   const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GitHub-Api-Version, Accept, Cache-Control, Pragma' };
   function allRecords() {
     const map = new Map();
@@ -34,15 +36,24 @@ export function createService(config, now, log = () => {}) {
     calls.push(entry); if (calls.length > 20000) calls.splice(0, 1000);
     counters.requests++;
     request.method === 'GET' ? counters.reads++ : counters.writes++;
-    const reply = (status, json, extra = {}) => { entry.status = status; return { status, json, headers: { ...headers, ...extra } }; };
+    const reply = (status, json, extra = {}) => { entry.status = status; return { status, json, headers: { ...headers, 'Access-Control-Expose-Headers': 'Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Reset, X-RateLimit-Resource', ...(config.githubLimits ? quotas.headers() : {}), ...extra } }; };
     try {
       if (config.latencyMs) await new Promise(resolve => setTimeout(resolve, config.latencyMs));
       if (driver.offline) { entry.status = 0; return { abort: true }; }
+      if (now() < (observedCooldowns.get(driver.id) || 0)) { counters.earlyRetries++; entry.earlyRetry = true; }
+      const limited = quotas.admit(request.method, path ? 'contents:' + path : 'repository', active);
+      if (limited) {
+        counters.rateLimits++; entry.limitReason = limited.reason;
+        observedCooldowns.set(driver.id, limited.reason === 'primary' ? quotas.state().resetAt : now() + 60000);
+        log('warning', `共享账号触发${limited.reason === 'primary' ? '小时额度' : '写入/并发二级限制'}（司机 ${driver.id}）`);
+        return reply(limited.status, { message: limited.message }, limited.headers);
+      }
       const count = (driverRequests.get(driver.id) || 0) + 1; driverRequests.set(driver.id, count);
       if ((cooldowns.get(driver.id) || 0) > now() || (config.rateLimitEvery && count % config.rateLimitEvery === 0)) {
         counters.rateLimits++;
-        const until = Math.max(cooldowns.get(driver.id) || 0, now() + config.retryAfterSeconds * 1000);
+        const until = (cooldowns.get(driver.id) || 0) > now() ? cooldowns.get(driver.id) : now() + config.retryAfterSeconds * 1000;
         cooldowns.set(driver.id, until);
+        observedCooldowns.set(driver.id, until);
         log('warning', `司机 ${driver.id} 收到模拟限流`, { driver: driver.id });
         return reply(429, { message: 'Simulated rate limit' }, { 'Retry-After': String(Math.ceil((until - now()) / 1000)) });
       }
@@ -66,6 +77,6 @@ export function createService(config, now, log = () => {}) {
   return {
     handle, allRecords, files, calls, expectedHistory,
     get active() { return active; },
-    metrics() { const records = allRecords(); return { ...counters, cloudRecords: records.filter(row => !row.deleted).length, archives: files.size - 1, bytes: [...files.values()].reduce((sum, file) => sum + Buffer.byteLength(JSON.stringify(file.data)), 0) }; },
+    metrics() { const records = allRecords(); return { ...counters, quota: quotas.state(), cloudRecords: records.filter(row => !row.deleted).length, archives: files.size - 1, bytes: [...files.values()].reduce((sum, file) => sum + Buffer.byteLength(JSON.stringify(file.data)), 0) }; },
   };
 }

@@ -7,6 +7,8 @@ export const DEFAULT_CONFIG = {
   rateLimitEvery: 0, retryAfterSeconds: 60, historyBookings: 0,
   settleMinutes: 5, manualRescue: true, seed: 42, browser: 'chromium',
   recordTrace: true, recordVideo: false, liveFrames: true, maxRealMinutes: 15,
+  githubLimits: true, primaryLimit: 5000, primaryUsed: 0, primaryResetSeconds: 3600,
+  contentPerMinute: 80, contentPerHour: 500, otherRequestsPerHour: 0, otherWritesPerHour: 0,
 };
 const bounds = {
   drivers: [1, 20], bookingsPerDriver: [1, 30], durationMinutes: [1, 1440], speed: [1, 6000],
@@ -16,6 +18,8 @@ const bounds = {
   latencyMs: [0, 1000], errorPercent: [0, 50], conflictPercent: [0, 50], lostResponsePercent: [0, 30],
   rateLimitEvery: [0, 10000], retryAfterSeconds: [1, 3600], historyBookings: [0, 200],
   settleMinutes: [1, 30], seed: [1, 2147483647], maxRealMinutes: [1, 30],
+  primaryLimit: [1, 50000], primaryUsed: [0, 50000], primaryResetSeconds: [1, 3600],
+  contentPerMinute: [1, 1000], contentPerHour: [1, 10000], otherRequestsPerHour: [0, 50000], otherWritesPerHour: [0, 10000],
 };
 export function validateConfig(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('参数必须是 JSON 对象');
@@ -24,7 +28,9 @@ export function validateConfig(input = {}) {
   for (const [key, [min, max]] of Object.entries(bounds)) {
     if (!Number.isInteger(config[key]) || config[key] < min || config[key] > max) throw new Error(`${key} 必须为 ${min}—${max} 的整数`);
   }
-  for (const key of ['restartOnReconnect', 'manualRescue', 'recordTrace', 'recordVideo', 'liveFrames']) if (typeof config[key] !== 'boolean') throw new Error(`${key} 必须为布尔值`);
+  for (const key of ['restartOnReconnect', 'manualRescue', 'recordTrace', 'recordVideo', 'liveFrames', 'githubLimits']) if (typeof config[key] !== 'boolean') throw new Error(`${key} 必须为布尔值`);
+  if (config.primaryUsed > config.primaryLimit) throw new Error('账号已用额度不能超过小时额度');
+  if (config.otherWritesPerHour > config.otherRequestsPerHour) throw new Error('其他项目的写入数不能超过它的总请求数');
   if (!['chromium', 'webkit'].includes(config.browser)) throw new Error('请选择 Chromium 或 WebKit');
   if (typeof config.startTime !== 'string' || !/^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(config.startTime)) throw new Error('请填写有效的开始时间');
   const date = new Date(config.startTime + ':00+08:00');

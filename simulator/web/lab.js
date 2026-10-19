@@ -1,6 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-let token = '', defaults, selectedId = '', current, chartMode = 'records', loadedFiles = '', lastHistory = '', starting = false;
+let token = '', defaults, selectedId = /^run-[a-f0-9-]{36}$/.test(new URL(location.href).searchParams.get('run') || '') ? new URL(location.href).searchParams.get('run') : '', current, chartMode = 'records', loadedFiles = '', lastHistory = '', starting = false;
 const form = $('#config-form');
 const statusNames = { starting: '准备中', running: '运行中', completed: '已完成', stopped: '已停止', failed: '运行中断' };
 const money = value => '¥' + ((value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -74,6 +74,7 @@ async function render(state) {
   token = state.token; current = state.selected;
   const job = current; const controlling = !!job && job.id === state.activeId && state.running && ['starting', 'running'].includes(job.status);
   $('#parameters').disabled = state.running; $('#start').disabled = state.running || starting;
+  $('#load-params').disabled = state.running || !job;
   $('#pause').disabled = !controlling || job.paused; $('#pause').hidden = !!(controlling && job.paused);
   $('#resume').hidden = !(controlling && job.paused); $('#stop').disabled = !controlling;
   $('#apply-speed').disabled = !controlling; $('#step').disabled = !controlling || !job.paused;
@@ -87,6 +88,8 @@ async function render(state) {
   $('#m-records').textContent = job ? `${job.metrics.cloudRecords} / ${job.expectedRecords}` : '—';
   $('#m-pending').textContent = job ? job.drivers.reduce((sum, phone) => sum + phone.pending, 0) : '—';
   $('#m-requests').textContent = job?.metrics.requests ?? '—';
+  const quota = job?.metrics.quota;
+  $('#quota-summary').textContent = quota?.enabled ? `共享账号：剩余 ${quota.remaining} / ${quota.limit} 次 · 其他项目模拟请求 ${quota.otherProjectRequests} 次 · 小时额度触发 ${quota.primaryLimitHits} 次 · 二级限制触发 ${quota.secondaryLimitHits} 次` : '共享额度模型未启用，或这是旧版运行记录。';
   if (job) {
     $('#checks').innerHTML = checkCard('自动检查', job.automaticCheck) + checkCard('手动恢复（另计）', job.recoveryCheck) + `<div class="check-result"><b>实收：云端 ${money(job.cloudReceipt)}</b>操作意图合计 ${money(job.expectedReceipt)}（含历史）</div>`;
     $('#findings').innerHTML = job.findings.map(issue => `<div class="finding ${esc(issue.severity)}">${esc(issue.message)}</div>`).join('');
@@ -97,7 +100,7 @@ async function render(state) {
     const old = $('#logs'); const bottom = old.scrollHeight - old.scrollTop - old.clientHeight < 30;
     old.innerHTML = logs.map(row => `<div class="log ${esc(row.level)}"><time>${esc(row.at)}</time><span>${esc(row.message)}</span></div>`).join('') || '<p class="empty">暂无匹配记录</p>';
     if (bottom) old.scrollTop = old.scrollHeight;
-    $('#network-summary').textContent = `SHA 冲突 ${job.metrics.conflicts} · 服务错误 ${job.metrics.serverErrors} · 限流 ${job.metrics.rateLimits} · 响应丢失 ${job.metrics.lostResponses} · 归档 ${job.metrics.archives} · ${(job.metrics.bytes / 1024).toFixed(1)} KB`;
+    $('#network-summary').textContent = `SHA 冲突 ${job.metrics.conflicts} · 服务错误 ${job.metrics.serverErrors} · 限流 ${job.metrics.rateLimits} · 提前重试 ${job.metrics.earlyRetries || 0} · 响应丢失 ${job.metrics.lostResponses} · 归档 ${job.metrics.archives} · ${(job.metrics.bytes / 1024).toFixed(1)} KB`;
     $('#requests').innerHTML = [...job.calls].reverse().map(row => `<tr><td>${new Date(row.at + 28800000).toISOString().slice(11, 19)}</td><td>${row.driver}</td><td>${esc(row.method)}</td><td>${esc(row.path)}</td><td class="${row.status >= 400 || !row.status ? 'bad' : ''}">${row.status || '中断 / 处理中'}</td></tr>`).join('');
   }
   drawChart(job); renderDrivers(job);
@@ -149,9 +152,10 @@ $('#config-file').addEventListener('change', async event => {
   event.target.value = '';
 });
 $('#history').addEventListener('change', event => { selectedId = event.target.value; loadedFiles = ''; });
+$('#load-params').addEventListener('click', () => { if (current) { fill(current.config); toast('已载入所选运行参数，可修改后重新开始'); } });
 document.querySelectorAll('[data-chart]').forEach(button => button.addEventListener('click', () => { chartMode = button.dataset.chart; document.querySelectorAll('[data-chart]').forEach(el => el.classList.toggle('selected', el === button)); drawChart(current); }));
 try {
-  const state = await request('/api/state'); token = state.token; defaults = state.defaults;
+  const state = await request('/api/state' + (selectedId ? '?id=' + selectedId : '')); token = state.token; defaults = state.defaults;
   let saved; try { saved = JSON.parse(localStorage.getItem('shuttle-lab:config:v1')); } catch {}
   fill(saved || todayConfig()); await render(state); poll();
 } catch (error) { $('#form-error').textContent = '无法连接本机控制服务：' + error.message; }

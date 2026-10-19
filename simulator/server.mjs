@@ -1,10 +1,11 @@
 import http from 'node:http';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { readFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, resolve, sep, extname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DEFAULT_CONFIG, validateConfig } from './config.mjs';
 import { Simulation } from './engine.mjs';
+import { renderStressReport } from './stress-report.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json', '.zip': 'application/zip', '.webm': 'video/webm' };
@@ -37,7 +38,13 @@ export async function createLabServer({ port = 9340, output = join(root, 'simula
           const config = validateConfig(body);
           const id = 'run-' + randomUUID();
           const sim = new Simulation(id, config, origin + '/app/', join(output, id));
+          // Reserve before reading metadata: concurrent start requests must not
+          // launch separate jobs against one shared interval-injection endpoint.
           active = { sim, directory: join(output, id) }; jobs.set(id, active);
+          try {
+            const sources = await Promise.all(['version.json', 'sync.js', 'app.js', 'core.js'].map(name => readFile(join(root, name))));
+            sim.state.application = { version: JSON.parse(sources[0]).version, hashes: Object.fromEntries(['sync.js', 'app.js', 'core.js'].map((name, index) => [name, createHash('sha256').update(sources[index + 1]).digest('hex')])) };
+          } catch (error) { sim.state.status = 'failed'; sim.state.phase = error.message; sim.state.finishedAt = new Date().toISOString(); throw error; }
           sim.run().catch(error => { sim.state.status = 'failed'; sim.state.phase = error.message; sim.state.finishedAt = new Date().toISOString(); });
           return send(202, { id });
         }
@@ -48,6 +55,18 @@ export async function createLabServer({ port = 9340, output = join(root, 'simula
         return send(404, { error: '接口不存在' });
       }
       if (req.method !== 'GET') return send(405, { error: '不支持该方法' });
+      if (url.pathname === '/stress') {
+        const batches = (await readdir(output, { withFileTypes: true })).filter(entry => entry.isDirectory() && /^stress-[\dTZ-]+$/.test(entry.name)).map(entry => entry.name).sort();
+        const requested = url.searchParams.get('batch');
+        const directory = requested ? batches.find(name => name === requested) : batches.at(-1);
+        if (!directory) return send(404, { error: '还没有压力测试记录，请先运行 npm run test:stress' });
+        let report;
+        try { report = JSON.parse(await readFile(join(output, directory, 'results.json'), 'utf8')); }
+        catch (error) { if (error.code !== 'ENOENT') throw error; report = { startedAt: '测试刚开始', updatedAt: new Date().toISOString(), results: [] }; }
+        const profiles = JSON.parse(await readFile(join(output, directory, 'profiles.json'), 'utf8'));
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return res.end(renderStressReport(report, profiles));
+      }
       if (url.pathname === '/api/state') {
         const id = url.searchParams.get('id'); const selected = id ? jobs.get(id) : active || [...jobs.values()].at(-1);
         return send(200, { token, defaults: DEFAULT_CONFIG, running: !!running(), activeId: active?.sim.id || null,

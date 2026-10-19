@@ -1,4 +1,4 @@
-import { freshData, mergeData, validateData, localDate, validDate } from './core.js?v=1.3.3';
+import { freshData, mergeData, validateData, localDate, validDate } from './core.js?v=1.3.4';
 export const DATA_REPO = 'liziyaaa/dashi-shuttle-data';
 export const UPLOAD_DELAY = 30000;
 export const PULL_INTERVAL = 120000;
@@ -58,7 +58,10 @@ export function createSyncClient(config) {
       if (response.status === 429 || (response.status === 403 && (response.headers.get('x-ratelimit-remaining') === '0' || /rate limit|abuse/i.test(detail.message || '') || response.headers.get('retry-after')))) {
         const retry = Number(response.headers.get('retry-after'));
         const reset = Number(response.headers.get('x-ratelimit-reset')) * 1000;
-        cooldownUntil = Math.max(Date.now() + (retry > 0 ? retry * 1000 : 60000), reset || 0);
+        // Secondary limits also include the primary reset header. Respect that
+        // reset only when the hourly quota is actually exhausted.
+        const exhausted = response.headers.get('x-ratelimit-remaining') === '0';
+        cooldownUntil = Math.max(Date.now() + (retry > 0 ? retry * 1000 : 60000), exhausted ? reset || 0 : 0);
         const error = new Error('同步请求过于频繁，稍后自动重试；记录已保存在本机'); error.retryAt = cooldownUntil; throw error;
       }
       if (response.status === 403) throw new Error('连接密钥权限不足，请联系管理员为数据仓库开启 Contents 读写权限');
